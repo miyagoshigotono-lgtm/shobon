@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>ねこのアクション</title>
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="ねこのアクション">
+<meta name="theme-color" content="#111111">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#fff; overflow:hidden; font-family:'Courier New',monospace; touch-action:none; user-select:none; }
+#gameContainer { position:relative; width:100vw; height:100vh; overflow:hidden; }
+canvas { display:block; }
+#hud { position:fixed; top:12px; left:0; right:0; display:flex; justify-content:center; gap:20px; pointer-events:none; z-index:10; }
+#deathCount,#stageLabel { font-family:'Courier New',monospace; font-size:13px; color:#333; letter-spacing:2px; background:rgba(255,255,255,0.9); padding:4px 14px; border:1px solid #bbb; }
+#deathMessage { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); font-family:'Courier New',monospace; font-size:clamp(18px,5vw,28px); color:#111; letter-spacing:3px; text-align:center; pointer-events:none; z-index:20; opacity:0; transition:opacity 0.15s; white-space:nowrap; }
+#deathMessage.show { opacity:1; }
+#titleScreen { position:fixed; inset:0; background:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:30; }
+#titleScreen h1 { font-family:'Courier New',monospace; font-size:clamp(20px,6vw,36px); letter-spacing:4px; color:#111; margin-bottom:8px; }
+#titleScreen p { font-family:'Courier New',monospace; font-size:clamp(10px,3vw,14px); color:#888; letter-spacing:2px; margin-bottom:40px; }
+#titleCat { margin-bottom:32px; }
+.menuBtn { font-family:'Courier New',monospace; font-size:clamp(13px,4vw,18px); letter-spacing:4px; color:#111; background:none; border:2px solid #111; padding:12px 32px; cursor:pointer; transition:background .15s,color .15s; }
+.menuBtn:active,.menuBtn:hover { background:#111; color:#fff; }
+#stageClearScreen,#clearScreen { position:fixed; inset:0; background:#fff; display:none; flex-direction:column; align-items:center; justify-content:center; z-index:30; }
+#stageClearScreen h2,#clearScreen h2 { font-family:'Courier New',monospace; font-size:clamp(22px,6vw,40px); letter-spacing:4px; color:#111; margin-bottom:16px; }
+#stageClearScreen p,#clearScreen p { font-family:'Courier New',monospace; font-size:clamp(11px,3vw,15px); color:#555; letter-spacing:2px; margin-bottom:40px; }
+#controller { position:fixed; bottom:0; left:0; right:0; height:140px; display:flex; justify-content:space-between; align-items:flex-end; padding:0 20px 24px; z-index:10; pointer-events:none; }
+.ctrl-group { display:flex; gap:8px; pointer-events:all; }
+.ctrl-btn { width:64px; height:64px; background:rgba(0,0,0,0.08); border:2px solid rgba(0,0,0,0.2); border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:22px; cursor:pointer; touch-action:none; -webkit-tap-highlight-color:transparent; transition:background .08s; }
+.ctrl-btn.pressed,.ctrl-btn:active { background:rgba(0,0,0,0.22); }
+#jumpBtn { width:72px; height:72px; }
+</style>
+</head>
+<body>
+<div id="gameContainer"><canvas id="gameCanvas"></canvas></div>
+<div id="hud"><div id="stageLabel">STAGE 1</div><div id="deathCount">死亡 : 0</div></div>
+<div id="deathMessage">ハッ‥ハッ‥ハ・・・。</div>
+
+<div id="titleScreen">
+  <div id="titleCat"><canvas id="titleCatCanvas" width="64" height="64"></canvas></div>
+  <h1>ねこのアクション</h1>
+  <p>ゆっくりしていってね！！！</p>
+  <button class="menuBtn" onclick="startGame()">はじめる</button>
+</div>
+
+<div id="stageClearScreen">
+  <h2>STAGE 1 クリア！</h2>
+  <p id="stageClearMsg">死亡回数 : 0</p>
+  <button class="menuBtn" onclick="goStage2()">STAGE 2 へ</button>
+</div>
+
+<div id="clearScreen">
+  <h2>全ステージクリア！</h2>
+  <p id="clearMsg">総死亡回数 : 0</p>
+  <button class="menuBtn" onclick="restartGame()">もういちど</button>
+</div>
+
+<div id="controller">
+  <div class="ctrl-group">
+    <div class="ctrl-btn" id="leftBtn">◀</div>
+    <div class="ctrl-btn" id="rightBtn">▶</div>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-btn" id="jumpBtn">▲</div>
+  </div>
+</div>
+
+<script>
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+resize(); window.addEventListener('resize',resize);
+
+const TILE=32,GRAVITY=0.55,JUMP_FORCE=-12.5,MOVE_SPEED=3.2,CAT_W=26,CAT_H=28,GY=480;
+let state='title',currentStage=1,deathCount=0,camera={x:0},IS_DEAD=false;
+
+// 入力
+const keys={left:false,right:false};
+let jumpPressed=false,jumpUsed=false;
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a')keys.left=true;
+  if(e.key==='ArrowRight'||e.key==='d')keys.right=true;
+  if((e.key==='ArrowUp'||e.key===' '||e.key==='z')&&!jumpUsed){jumpPressed=true;jumpUsed=true;}
+});
+document.addEventListener('keyup',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a')keys.left=false;
+  if(e.key==='ArrowRight'||e.key==='d')keys.right=false;
+  if(e.key==='ArrowUp'||e.key===' '||e.key==='z')jumpUsed=false;
+});
+function setupTouch(id,key){
+  const el=document.getElementById(id);
+  el.addEventListener('touchstart',e=>{e.preventDefault();keys[key]=true;el.classList.add('pressed');},{passive:false});
+  el.addEventListener('touchend',e=>{e.preventDefault();keys[key]=false;el.classList.remove('pressed');},{passive:false});
+  el.addEventListener('touchcancel',()=>{keys[key]=false;el.classList.remove('pressed');});
+}
+setupTouch('leftBtn','left'); setupTouch('rightBtn','right');
+const jumpBtn=document.getElementById('jumpBtn');
+jumpBtn.addEventListener('touchstart',e=>{e.preventDefault();jumpBtn.classList.add('pressed');if(!jumpUsed){jumpPressed=true;jumpUsed=true;}},{passive:false});
+jumpBtn.addEventListener('touchend',e=>{e.preventDefault();jumpBtn.classList.remove('pressed');jumpUsed=false;},{passive:false});
+
+// プレイヤー
+let player={};
+function resetPlayer(sx,sy){player={x:sx,y:sy,vx:0,vy:0,onGround:false,facingRight:true,alive:true,frame:0,frameTimer:0};}
+
+// ステージオブジェクト
+let platforms=[],hazards=[],goalObj=null,movingObjects=[],projectiles=[],pitSpikes=[];
+let worldWidth=0,trap={},trap2={};
+
+// ヘルパー
+function addSolid(x,y,w=TILE,h=TILE){platforms.push({x,y,w,h,type:'solid',visible:true});}
+function addFakeFloor(x,y,w=TILE,h=TILE){platforms.push({x,y,w,h,type:'fake_floor',visible:true});}
+function addCrushBlock(x,y,w,h){platforms.push({x,y,w,h,type:'crush',visible:true,falling:false,vy:0,triggered:false});}
+function addMovingPlatform(x,y,w,h,id){platforms.push({x,y,w,h,type:'moving',id,visible:true});}
+function addMovingSpike(x,y,w,h,id){hazards.push({x,y,w,h,type:'moving_spike',id,visible:true});}
+function addCeilingSpike(x,y,w,h,id=''){movingObjects.push({x,y,w,h,type:'ceiling_spike',id,visible:false,vy:0,active:false,done:false});}
+function addFloorSpike(x,y,w,h){movingObjects.push({x,y,w,h,type:'floor_spike',visible:false,active:false,targetY:0});}
+function addFakeGoal(x,y){movingObjects.push({x,y,type:'fake_goal',triggered:false});}
+function addDynamicIsland(x,y,w,h,id){platforms.push({x,y,w,h,type:'dynamic',id,visible:true,landed:false,fallTimer:0,falling:false,vy:0,flying:false,flyVx:0});}
+function addOscIsland(x,y,w,h,id,axis,amp,speed){platforms.push({x,y,w,h,type:'oscil',id,visible:true,baseX:x,baseY:y,axis,amp,speed,phase:Math.random()*Math.PI*2});}
+function addStaticSpike(x,y,w,h){hazards.push({x,y,w,h,type:'static_spike',visible:true});}
+function addRoamSpike(x,y,w,h,id,minX,maxX,spd){hazards.push({x,y,w,h,type:'roam_spike',id,visible:true,minX,maxX,speed:spd,dir:1});}
+
+// ============================================================
+// ステージ1
+// ============================================================
+function buildStage1(){
+  platforms=[];hazards=[];movingObjects=[];projectiles=[];pitSpikes=[];
+  trap={pitSpike:false,crushBlock:false,spikeIslandMoved:false,fakeGoalFired:false,
+        ceilingSpikeDropped:false,floorRiseActive:false,
+        islandAUp1:false,islandAUp2:false,islandAUp3:false,islandAFly:false};
+  const S=TILE;
+
+  for(let i=0;i<10;i++)addSolid(i*S,GY);                     // 島①
+  for(let i=12;i<18;i++)addSolid(i*S,GY);                    // 島②
+  addCrushBlock(13*S,GY-2*S,4*S,S);
+  for(let i=20;i<28;i++)addSolid(i*S,GY);                    // 島③
+  addMovingPlatform(22*S,GY-3*S,2*S,S,'spikeIsland');
+  addMovingSpike(22*S,GY-3*S-S+8,2*S,14,'spikeIslandHazard');
+  for(let i=30;i<41;i++)addSolid(i*S,GY);                    // 島④
+  addCeilingSpike(30*S,-S,2*S,S,'ceilA');
+  addCeilingSpike(34*S,-S,2*S,S,'ceilB');
+  addFloorSpike(38*S,GY+S,2*S,S);
+  addSolid(43*S,GY);addSolid(44*S,GY);                        // 島⑤ 4島ギミック
+  addDynamicIsland(46*S,GY-2*S,2*S,S,'islandA');
+  addDynamicIsland(49*S,GY-3*S,2*S,S,'islandB');
+  addDynamicIsland(52*S,GY-4*S,2*S,S,'islandC');
+  addDynamicIsland(55*S,GY-3*S,2*S,S,'islandD');
+  for(let i=58;i<69;i++)addSolid(i*S,GY);                    // 島⑥ ゴール前
+  addFakeGoal(62*S,GY-4*S);
+  addFakeFloor(62*S,GY,S,S); addFakeFloor(63*S,GY,S,S); addFakeFloor(64*S,GY,S,S);
+  addFakeFloor(66*S,GY,2*S,S);
+  goalObj={x:68*S,y:GY-4*S,w:S,h:4*S,poleKillH:3*S,flagY:GY-4*S,flagH:S};
+  worldWidth=70*S;
+}
+
+// ============================================================
+// ステージ2
+// ============================================================
+function buildStage2(){
+  platforms=[];hazards=[];movingObjects=[];projectiles=[];pitSpikes=[];
+  trap2={floorTrap:false,pitB:false,crushA:false,crushB:false,ceilDrop:false,ceilDrop2:false};
+  const S=TILE;
+
+  // 島①: スタート。x=5〜6踏むと床トゲ上昇
+  for(let i=0;i<8;i++)addSolid(i*S,GY);
+  addFloorSpike(5*S,GY+S,2*S,S);
+
+  // 穴: 8〜10 (右2マス通過でトゲ)
+
+  // 島②: 上下振動トゲ島
+  for(let i=11;i<17;i++)addSolid(i*S,GY);
+  addOscIsland(12*S,GY-4*S,2*S,S,'oscA','y',2*S,0.04);
+  addStaticSpike(12*S,GY-4*S-S+8,2*S,14);
+
+  // 穴: 17〜18
+
+  // 島③: 押しつぶし2連
+  for(let i=19;i<27;i++)addSolid(i*S,GY);
+  addCrushBlock(20*S,GY-2*S,2*S,S);
+  addCrushBlock(24*S,GY-2*S,2*S,S);
+
+  // 穴: 27〜29
+
+  // 島④: 横往復トゲ + 天井トゲ3本
+  for(let i=30;i<42;i++)addSolid(i*S,GY);
+  addRoamSpike(31*S,GY-S+8,S,14,'roamA',30*S,34*S,2.5);
+  addRoamSpike(37*S,GY-S+8,S,14,'roamB',35*S,41*S,3.5);
+  addCeilingSpike(31*S,-S,S,S,'c2A');
+  addCeilingSpike(33*S,-S*2,S,S,'c2B');
+  addCeilingSpike(36*S,-S,S,S,'c2C');
+
+  // 穴: 42〜43
+
+  // 島⑤: 上下振動足場3つ、一部に棘
+  addSolid(44*S,GY);addSolid(45*S,GY);
+  addOscIsland(47*S,GY-2*S,2*S,S,'oscB','y',S,0.06);
+  addOscIsland(50*S,GY-3*S,2*S,S,'oscC','y',S*1.5,0.05);
+  addOscIsland(53*S,GY-2*S,2*S,S,'oscD','y',S,0.07);
+  addStaticSpike(47*S,GY-4*S+8,2*S,14);
+  addStaticSpike(53*S,GY-4*S+8,2*S,14);
+
+  // 穴: 56〜57
+
+  // 島⑥: 左右振動足場 + 地面棘
+  addSolid(58*S,GY);addSolid(59*S,GY);
+  addOscIsland(61*S,GY-2*S,2*S,S,'oscE','x',2*S,0.04);
+  addOscIsland(64*S,GY-3*S,2*S,S,'oscF','x',S,0.06);
+  addOscIsland(67*S,GY-2*S,2*S,S,'oscG','x',S*1.5,0.05);
+  addStaticSpike(62*S,GY-S+8,S,14);
+  addStaticSpike(65*S,GY-S+8,S,14);
+
+  // 穴: 70〜71
+
+  // 島⑦: ゴール前広場
+  for(let i=72;i<88;i++)addSolid(i*S,GY);
+  addCeilingSpike(74*S,-S,S,S,'c3A');
+  addCeilingSpike(76*S,-S*2,S,S,'c3B');
+  addCeilingSpike(78*S,-S,S,S,'c3C');
+  addFakeFloor(80*S,GY,2*S,S);
+  addFakeFloor(83*S,GY,S,S);
+  addFakeGoal(82*S,GY-4*S);
+  addFakeFloor(82*S,GY,S,S);addFakeFloor(84*S,GY,S,S);
+  goalObj={x:87*S,y:GY-4*S,w:S,h:4*S,poleKillH:3*S,flagY:GY-4*S,flagH:S};
+  worldWidth=90*S;
+}
+
+// ============================================================
+// トラップ更新 (1面)
+// ============================================================
+function updateTraps1(){
+  const S=TILE,px=player.x,py=player.y;
+
+  if(!trap.pitSpike && px+CAT_W>11*S && px<12*S && py<GY){
+    trap.pitSpike=true; firePitSpike(11*S+S/2,GY+S);
+  }
+  if(!trap.crushBlock){
+    for(const b of platforms){
+      if(b.type==='crush'&&!b.triggered&&px+CAT_W>b.x&&px<b.x+b.w&&py>b.y+b.h&&py<b.y+b.h+2*S){
+        b.triggered=true;b.falling=true;trap.crushBlock=true;
+      }
+    }
+  }
+  if(!trap.spikeIslandMoved){
+    for(const b of platforms){
+      if(b.type==='moving'&&b.id==='spikeIsland'){
+        if(Math.abs((player.x+CAT_W/2)-(b.x+b.w/2))<2*TILE){
+          trap.spikeIslandMoved=true;b.x-=2*TILE;
+          for(const h of hazards){if(h.id==='spikeIslandHazard')h.x-=2*TILE;}
+        }
+      }
+    }
+  }
+  if(!trap.ceilingSpikeDropped&&player.onGround&&px>32*S&&px<33*S){
+    trap.ceilingSpikeDropped=true;
+    for(const m of movingObjects){if(m.type==='ceiling_spike'){m.active=true;m.visible=true;m.y=-S;m.vy=16;}}
+  }
+  if(!trap.floorRiseActive&&player.onGround&&px>37*S&&px<38*S){
+    trap.floorRiseActive=true;
+    for(const m of movingObjects){if(m.type==='floor_spike'){m.active=true;m.visible=true;m.targetY=GY-S+8;}}
+  }
+  updateIslandGimmick();
+  checkFakeGoal(); checkGoal();
+}
+
+// ============================================================
+// トラップ更新 (2面)
+// ============================================================
+function updateTraps2(){
+  const S=TILE,px=player.x,py=player.y;
+
+  if(!trap2.floorTrap&&player.onGround&&px>5*S&&px<7*S){
+    trap2.floorTrap=true;
+    for(const m of movingObjects){if(m.type==='floor_spike'){m.active=true;m.visible=true;m.targetY=GY-S+8;}}
+  }
+  if(!trap2.pitB&&px+CAT_W>9*S&&px<10*S&&py<GY){
+    trap2.pitB=true; firePitSpike(9*S+S/2,GY+S);
+  }
+  if(!trap2.crushA){
+    for(const b of platforms){
+      if(b.type==='crush'&&!b.triggered&&b.x===20*S&&px+CAT_W>b.x&&px<b.x+b.w&&py>b.y+b.h&&py<b.y+b.h+2*S){
+        b.triggered=true;b.falling=true;trap2.crushA=true;
+      }
+    }
+  }
+  if(!trap2.crushB){
+    for(const b of platforms){
+      if(b.type==='crush'&&!b.triggered&&b.x===24*S&&px+CAT_W>b.x&&px<b.x+b.w&&py>b.y+b.h&&py<b.y+b.h+2*S){
+        b.triggered=true;b.falling=true;trap2.crushB=true;
+      }
+    }
+  }
+  if(!trap2.ceilDrop&&player.onGround&&px>32*S&&px<33*S){
+    trap2.ceilDrop=true;
+    for(const m of movingObjects){
+      if(['c2A','c2B','c2C'].includes(m.id)){
+        m.active=true;m.visible=true;
+        m.y=(m.id==='c2B')?-2*S:-S; m.vy=15;
+      }
+    }
+  }
+  if(!trap2.ceilDrop2&&player.onGround&&px>74*S&&px<76*S){
+    trap2.ceilDrop2=true;
+    for(const m of movingObjects){
+      if(['c3A','c3B','c3C'].includes(m.id)){
+        m.active=true;m.visible=true;
+        m.y=(m.id==='c3B')?-3*S:-S; m.vy=13;
+      }
+    }
+  }
+  checkFakeGoal(); checkGoal();
+}
+
+function checkFakeGoal(){
+  const S=TILE,px=player.x,py=player.y;
+  for(const m of movingObjects){
+    if(m.type==='fake_goal'&&!m.triggered){
+      if(Math.abs(px-m.x)<S*1.5&&py<GY&&py>GY-5*S){
+        m.triggered=true;
+        const n=currentStage===1?6:8;
+        for(let i=0;i<n;i++) projectiles.push({x:m.x+(i-(n/2))*S*0.7,y:-S,w:10,h:20,vy:10+i*1.5});
+      }
+    }
+  }
+}
+
+function checkGoal(){
+  if(!goalObj) return;
+  const g=goalObj,S=TILE;
+  // 旗(最上部) → クリア
+  if(rectOverlap(player.x,player.y,CAT_W,CAT_H, g.x,g.flagY,g.w+22,g.flagH)){
+    if(currentStage===1) triggerStageClear(); else triggerAllClear();
+  }
+  // ポール本体 → 死亡
+  if(player.alive&&rectOverlap(player.x,player.y,CAT_W,CAT_H, g.x+S/2-3,g.flagY+g.flagH,6,g.poleKillH)){
+    killPlayer();
+  }
+}
+
+// ============================================================
+// 4島ギミック
+// ============================================================
+function updateIslandGimmick(){
+  const S=TILE;
+  const isA=platforms.find(b=>b.id==='islandA');
+  const isB=platforms.find(b=>b.id==='islandB');
+  const isC=platforms.find(b=>b.id==='islandC');
+  const isD=platforms.find(b=>b.id==='islandD');
+  if(!isA||!isB||!isC||!isD)return;
+  const onIsl=(isl)=>player.onGround&&rectOverlap(player.x,player.y+CAT_H-2,CAT_W,4,isl.x,isl.y,isl.w,S/2);
+  if(!trap.islandAUp1&&onIsl(isB)){trap.islandAUp1=true;isB.x+=S;isA.y-=2*S;isB.fallTimer=60;}
+  if(!trap.islandAUp2&&onIsl(isC)){trap.islandAUp2=true;isC.x-=S;isC.y+=2*S;isA.y-=2*S;}
+  if(!trap.islandAUp3&&onIsl(isD)){trap.islandAUp3=true;isA.y-=2*S;isD.landed=true;}
+  if(trap.islandAUp3&&!trap.islandAFly&&isD.landed&&!onIsl(isD)){trap.islandAFly=true;isA.flying=true;isA.flyVx=14;}
+  if(isB.fallTimer>0){isB.fallTimer--;if(isB.fallTimer===0)isB.falling=true;}
+}
+
+// ============================================================
+// 物理更新
+// ============================================================
+function updateMovingObjects(){
+  for(const m of movingObjects){
+    if(!m.active&&m.type!=='fake_goal')continue;
+    if(m.type==='ceiling_spike'){
+      m.y+=m.vy; if(m.y>canvas.height+100)m.done=true;
+      if(!m.done&&player.alive&&rectOverlap(player.x,player.y,CAT_W,CAT_H,m.x,m.y,m.w,m.h))killPlayer();
+    }
+    if(m.type==='floor_spike'){
+      if(m.y>m.targetY)m.y-=6; else m.y=m.targetY;
+      if(player.alive&&rectOverlap(player.x,player.y,CAT_W,CAT_H,m.x,m.y,m.w,m.h))killPlayer();
+    }
+  }
+  for(const p of projectiles){p.y+=p.vy;if(player.alive&&rectOverlap(player.x,player.y,CAT_W,CAT_H,p.x,p.y,p.w,p.h))killPlayer();}
+  projectiles=projectiles.filter(p=>p.y<canvas.height+100);
+  for(const b of platforms){
+    if(b.type==='crush'&&b.falling){
+      b.vy=(b.vy||0)+0.9;b.y+=b.vy;
+      if(b.y>=GY){b.y=GY;b.falling=false;}
+      if(player.alive&&rectOverlap(player.x,player.y,CAT_W,CAT_H,b.x,b.y,b.w,b.h))killPlayer();
+    }
+    if(b.type==='dynamic'){
+      if(b.falling){b.vy=(b.vy||0)+0.7;b.y+=b.vy;if(b.y>canvas.height+200)b.visible=false;}
+      if(b.flying){b.x+=b.flyVx;if(player.alive&&rectOverlap(player.x,player.y,CAT_W,CAT_H,b.x,b.y,b.w,b.h))killPlayer();if(b.x>worldWidth+200)b.visible=false;}
+    }
+    if(b.type==='oscil'){
+      b.phase+=b.speed;
+      if(b.axis==='y')b.y=b.baseY+Math.sin(b.phase)*b.amp;
+      if(b.axis==='x')b.x=b.baseX+Math.sin(b.phase)*b.amp;
+    }
+  }
+  for(const h of hazards){
+    if(h.type==='roam_spike'){h.x+=h.speed*h.dir;if(h.x<=h.minX||h.x+h.w>=h.maxX)h.dir*=-1;}
+  }
+}
+
+function updatePitSpikes(){
+  for(const s of pitSpikes){s.y+=s.vy;if(player.alive&&rectOverlap(player.x,player.y,CAT_W,CAT_H,s.x,s.y,s.w,s.h))killPlayer();}
+  pitSpikes=pitSpikes.filter(s=>s.y>-400);
+}
+
+function firePitSpike(cx,startY){
+  for(let i=-1;i<=1;i++) pitSpikes.push({x:cx+i*14-5,y:startY,w:10,h:20,vy:-20});
+}
+
+function rectOverlap(ax,ay,aw,ah,bx,by,bw,bh){return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by;}
+
+function resolvePlatforms(){
+  player.onGround=false;
+  for(const b of platforms){
+    if(!b.visible)continue;
+    if(b.type==='fake_floor')continue;
+    if(b.type==='crush'&&b.falling&&b.vy>2)continue;
+    if(b.type==='dynamic'&&(!b.visible||b.falling||b.flying))continue;
+    if(!rectOverlap(player.x,player.y,CAT_W,CAT_H,b.x,b.y,b.w,b.h))continue;
+    const ox=Math.min(player.x+CAT_W,b.x+b.w)-Math.max(player.x,b.x);
+    const oy=Math.min(player.y+CAT_H,b.y+b.h)-Math.max(player.y,b.y);
+    if(ox>=oy){
+      if(player.y+CAT_H-player.vy<=b.y+2){player.y=b.y-CAT_H;player.vy=0;player.onGround=true;}
+      else{player.y=b.y+b.h;player.vy=2;}
+    } else {
+      if(player.x+CAT_W/2<b.x+b.w/2)player.x=b.x-CAT_W; else player.x=b.x+b.w;
+      player.vx=0;
+    }
+  }
+}
+
+// 死亡・クリア
+const deathMsg=document.getElementById('deathMessage');
+const deathCountEl=document.getElementById('deathCount');
+const stageLabelEl=document.getElementById('stageLabel');
+
+function killPlayer(){
+  if(!player.alive||IS_DEAD)return;
+  player.alive=false;player.vx=0;player.vy=-8;
+  deathCount++;deathCountEl.textContent='死亡 : '+deathCount;
+  IS_DEAD=true; deathMsg.classList.add('show');
+  setTimeout(()=>{deathMsg.classList.remove('show');setTimeout(()=>respawn(),300);},1600);
+}
+
+function respawn(){
+  IS_DEAD=false;pitSpikes=[];
+  if(currentStage===1){buildStage1();resetPlayer(60,380);}
+  else{buildStage2();resetPlayer(60,380);}
+  camera.x=0;
+}
+
+function triggerStageClear(){
+  state='stageclear';
+  document.getElementById('stageClearScreen').style.display='flex';
+  document.getElementById('stageClearMsg').textContent='死亡回数 : '+deathCount;
+}
+
+function goStage2(){
+  document.getElementById('stageClearScreen').style.display='none';
+  currentStage=2;stageLabelEl.textContent='STAGE 2';
+  pitSpikes=[];buildStage2();resetPlayer(60,380);camera.x=0;state='playing';
+}
+
+function triggerAllClear(){
+  state='clear';
+  document.getElementById('clearScreen').style.display='flex';
+  document.getElementById('clearMsg').textContent='総死亡回数 : '+deathCount;
+}
+
+function restartGame(){
+  deathCount=0;currentStage=1;
+  deathCountEl.textContent='死亡 : 0';stageLabelEl.textContent='STAGE 1';
+  document.getElementById('clearScreen').style.display='none';
+  pitSpikes=[];buildStage1();resetPlayer(60,380);camera.x=0;state='playing';
+}
+
+function startGame(){
+  document.getElementById('titleScreen').style.display='none';
+  currentStage=1;stageLabelEl.textContent='STAGE 1';
+  pitSpikes=[];buildStage1();resetPlayer(60,380);camera.x=0;state='playing';
+}
+
+// ============================================================
+// 描画
+// ============================================================
+function drawBlock(b){
+  if(!b.visible)return;
+  const px=Math.floor(b.x-camera.x),py=Math.floor(b.y);
+  if(px>canvas.width+b.w||px<-b.w)return;
+  ctx.save();
+  ctx.fillStyle='#222';ctx.fillRect(px,py,b.w,b.h);
+  ctx.fillStyle='#3a3a3a';
+  for(let i=2;i<b.w-2;i+=6)for(let j=2;j<b.h-2;j+=6)ctx.fillRect(px+i,py+j,2,2);
+  ctx.restore();
+}
+
+function drawHazards(){
+  for(const h of hazards){
+    if(!h.visible)continue;
+    const px=Math.floor(h.x-camera.x),py=Math.floor(h.y);
+    drawSpikeShape(px,py,h.w,h.h,true);
+  }
+}
+
+function drawMovingObjects(){
+  for(const m of movingObjects){
+    if(m.type==='ceiling_spike'&&m.visible)drawSpikeShape(m.x-camera.x,m.y,m.w,m.h,true);
+    if(m.type==='floor_spike'&&m.visible)drawSpikeShape(m.x-camera.x,m.y,m.w,m.h,false);
+    if(m.type==='fake_goal')drawGoalPole(m.x-camera.x,m.y,true);
+  }
+  for(const p of projectiles){
+    const px=Math.floor(p.x-camera.x);
+    ctx.fillStyle='#333';
+    ctx.beginPath();ctx.moveTo(px+p.w/2,p.y+p.h);ctx.lineTo(px,p.y);ctx.lineTo(px+p.w,p.y);ctx.closePath();ctx.fill();
+  }
+  for(const s of pitSpikes){
+    const px=Math.floor(s.x-camera.x);
+    ctx.fillStyle='#333';
+    ctx.beginPath();ctx.moveTo(px+s.w/2,s.y);ctx.lineTo(px,s.y+s.h);ctx.lineTo(px+s.w,s.y+s.h);ctx.closePath();ctx.fill();
+  }
+}
+
+function drawSpikeShape(px,py,w,h,pointUp){
+  ctx.fillStyle='#333';
+  const count=Math.max(1,Math.floor(w/12));
+  for(let i=0;i<count;i++){
+    ctx.beginPath();
+    if(pointUp){ctx.moveTo(px+i*12,py+h);ctx.lineTo(px+i*12+6,py);ctx.lineTo(px+i*12+12,py+h);}
+    else{ctx.moveTo(px+i*12,py);ctx.lineTo(px+i*12+6,py+h);ctx.lineTo(px+i*12+12,py);}
+    ctx.closePath();ctx.fill();
+  }
+}
+
+function drawGoalPole(px,py,isFake){
+  ctx.fillStyle='#555';ctx.fillRect(px+TILE/2-3,py,6,TILE*4);
+  ctx.fillStyle=isFake?'#999':'#111';
+  ctx.beginPath();ctx.moveTo(px+TILE/2+3,py+4);ctx.lineTo(px+TILE/2+22,py+14);ctx.lineTo(px+TILE/2+3,py+24);ctx.closePath();ctx.fill();
+}
+
+function drawGoal(){
+  if(!goalObj)return;
+  const g=goalObj,px=Math.floor(g.x-camera.x),py=Math.floor(g.y);
+  ctx.fillStyle='#555';ctx.fillRect(px+TILE/2-3,py,6,g.h);
+  ctx.fillStyle='#111';
+  ctx.beginPath();ctx.moveTo(px+TILE/2+3,py+4);ctx.lineTo(px+TILE/2+22,py+14);ctx.lineTo(px+TILE/2+3,py+24);ctx.closePath();ctx.fill();
+}
+
+function drawCat(p){
+  const x=Math.floor(p.x-camera.x),y=Math.floor(p.y);
+  ctx.save();
+  if(!p.facingRight){ctx.translate(x+CAT_W/2,y+CAT_H/2);ctx.scale(-1,1);ctx.translate(-(x+CAT_W/2),-(y+CAT_H/2));}
+  ctx.fillStyle='#111';
+  ctx.fillRect(x+3,y+10,20,16);ctx.fillRect(x+5,y+2,16,14);
+  ctx.fillRect(x+5,y,5,5);ctx.fillRect(x+16,y,5,5);
+  ctx.fillStyle='#fff';ctx.fillRect(x+8,y+6,4,4);ctx.fillRect(x+15,y+6,4,4);
+  ctx.fillStyle='#111';
+  if(p.alive){ctx.fillRect(x+9,y+7,2,3);ctx.fillRect(x+16,y+7,2,3);}
+  else{
+    ctx.fillStyle='#666';
+    ctx.fillRect(x+8,y+6,2,2);ctx.fillRect(x+11,y+9,2,2);ctx.fillRect(x+9,y+7,2,2);ctx.fillRect(x+10,y+8,2,2);
+    ctx.fillRect(x+15,y+6,2,2);ctx.fillRect(x+18,y+9,2,2);ctx.fillRect(x+16,y+7,2,2);ctx.fillRect(x+17,y+8,2,2);
+  }
+  ctx.fillStyle='#ff9999';ctx.fillRect(x+12,y+11,3,2);
+  ctx.fillStyle='#111';
+  const f=p.frame%2;
+  ctx.fillRect(x+4,y+24+(f?-2:0),7,6+(f?2:0));ctx.fillRect(x+15,y+24+(f?0:-2),7,6+(f?0:2));
+  ctx.fillRect(x+22,y+18,4,3);ctx.fillRect(x+25,y+15,3,4);ctx.fillRect(x+27,y+12,3,4);
+  ctx.restore();
+}
+
+function drawBackground(){
+  ctx.strokeStyle='rgba(0,0,0,0.04)';ctx.lineWidth=1;
+  const G=32,sx=Math.floor(camera.x/G)*G;
+  for(let gx=sx;gx<camera.x+canvas.width+G;gx+=G){ctx.beginPath();ctx.moveTo(gx-camera.x,0);ctx.lineTo(gx-camera.x,canvas.height);ctx.stroke();}
+  for(let gy=0;gy<canvas.height;gy+=G){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(canvas.width,gy);ctx.stroke();}
+}
+
+function drawTitleCat(){
+  const tc=document.getElementById('titleCatCanvas'),tctx=tc.getContext('2d');
+  tctx.clearRect(0,0,64,64);
+  const p=tctx,x=19,y=8;
+  p.fillStyle='#111';p.fillRect(x+3,y+10,20,16);p.fillRect(x+5,y+2,16,14);p.fillRect(x+5,y,5,5);p.fillRect(x+16,y,5,5);
+  p.fillStyle='#fff';p.fillRect(x+8,y+6,4,4);p.fillRect(x+15,y+6,4,4);
+  p.fillStyle='#111';p.fillRect(x+9,y+7,2,3);p.fillRect(x+16,y+7,2,3);
+  p.fillStyle='#ff9999';p.fillRect(x+12,y+11,3,2);
+  p.fillStyle='#111';p.fillRect(x+4,y+24,7,6);p.fillRect(x+15,y+24,7,6);p.fillRect(x+22,y+18,4,3);p.fillRect(x+25,y+15,3,4);
+}
+
+// メインループ
+let lastTime=0;
+function gameLoop(ts){
+  requestAnimationFrame(gameLoop);
+  const dt=Math.min(ts-lastTime,32);lastTime=ts;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(state!=='playing')return;
+
+  if(player.alive&&!IS_DEAD){
+    if(keys.left){player.vx=-MOVE_SPEED;player.facingRight=false;}
+    else if(keys.right){player.vx=MOVE_SPEED;player.facingRight=true;}
+    else player.vx*=0.7;
+    if(jumpPressed&&player.onGround){player.vy=JUMP_FORCE;player.onGround=false;}
+    jumpPressed=false;
+    player.vy+=GRAVITY;player.x+=player.vx;player.y+=player.vy;
+    resolvePlatforms();
+    if(player.y>canvas.height+60)killPlayer();
+    if(player.x<camera.x+5)player.x=camera.x+5;
+    if(player.x+CAT_W>worldWidth)player.x=worldWidth-CAT_W;
+    for(const h of hazards){if(!h.visible)continue;if(rectOverlap(player.x+2,player.y+2,CAT_W-4,CAT_H-4,h.x,h.y,h.w,h.h))killPlayer();}
+    if(currentStage===1)updateTraps1(); else updateTraps2();
+    player.frameTimer++;if(player.frameTimer>8){player.frame=(player.frame+1)%2;player.frameTimer=0;}
+  } else if(IS_DEAD&&!player.alive){
+    player.vy+=GRAVITY;player.y+=player.vy;jumpPressed=false;
+  }
+
+  updateMovingObjects();updatePitSpikes();
+  const targetX=player.x-canvas.width*0.35;
+  camera.x+=(targetX-camera.x)*0.12;
+  camera.x=Math.max(0,Math.min(camera.x,worldWidth-canvas.width));
+
+  drawBackground();
+  for(const b of platforms)drawBlock(b);
+  drawHazards();drawMovingObjects();drawGoal();drawCat(player);
+}
+
+drawTitleCat();
+requestAnimationFrame(gameLoop);
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('./sw.js').then(()=>console.log('SW登録完了')).catch(e=>console.log('SW登録失敗:',e));
+  });
+}
+</script>
+</body>
+</html>
