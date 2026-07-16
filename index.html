@@ -62,6 +62,13 @@
       border: 1px solid #bbb;
     }
 
+    body.finalZone #deathCount,
+    body.finalZone #stageLabel {
+      background: rgba(0, 0, 0, 0.85);
+      color: #eee;
+      border-color: #555;
+    }
+
     #deathMessage {
       position: fixed;
       top: 50%;
@@ -77,6 +84,10 @@
       opacity: 0;
       transition: opacity 0.15s;
       white-space: nowrap;
+    }
+
+    body.finalZone #deathMessage {
+      color: #eee;
     }
 
     #deathMessage.show {
@@ -144,6 +155,23 @@
       z-index: 30;
     }
 
+    #clearScreen.dark {
+      background: #0a0a0a;
+    }
+
+    #clearScreen.dark h2 {
+      color: #f0f0f0;
+    }
+
+    #clearScreen.dark p {
+      color: #aaa;
+    }
+
+    #clearScreen.dark .menuBtn {
+      color: #f0f0f0;
+      border-color: #f0f0f0;
+    }
+
     #stageClearScreen h2,
     #clearScreen h2 {
       font-family: 'Courier New', monospace;
@@ -198,6 +226,12 @@
       transition: background .08s;
     }
 
+    body.finalZone .ctrl-btn {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.3);
+      color: #eee;
+    }
+
     .ctrl-btn.pressed,
     .ctrl-btn:active {
       background: rgba(0, 0, 0, 0.22);
@@ -242,15 +276,15 @@
   </div>
 
   <div id="stageClearScreen">
-    <h2>STAGE 1 クリア！</h2>
+    <h2 id="stageClearTitle">STAGE 1 クリア！</h2>
     <p id="stageClearMsg">死亡回数 : 0</p>
-    <button class="menuBtn" onclick="goStage2()">STAGE 2 へ</button>
+    <button class="menuBtn" id="nextStageBtn" onclick="goNextStage()">STAGE 2 へ</button>
   </div>
 
   <div id="clearScreen">
-    <h2>全ステージクリア！</h2>
+    <h2 id="clearTitle">全ステージクリア！</h2>
     <p id="clearMsg">総死亡回数 : 0</p>
-    <button class="menuBtn" onclick="restartGame()">もういちど</button>
+    <button class="menuBtn" id="clearBtn" onclick="restartGame()">もういちど</button>
   </div>
 
   <div id="controller">
@@ -270,7 +304,36 @@
     resize(); window.addEventListener('resize', resize);
 
     const TILE = 32, GRAVITY = 0.55, JUMP_FORCE = -12.5, MOVE_SPEED = 3.2, CAT_W = 26, CAT_H = 28, GY = 480;
+    const STAGE_MAX = 5;
+    const FLAP_GRAV = 0.34, FLAP_IMPULSE = -6.2, FLAP_SPEED = 2.6;
     let state = 'title', currentStage = 1, deathCount = 0, camera = { x: 0 }, IS_DEAD = false;
+
+    // ステージ3〜5用のグローバル状態
+    let gravityDir = 1;                 // 1=通常 / -1=天井歩き (VVVVVV)
+    let activeMode = 'normal';          // normal / vvvvvv / flappy / reversed
+    let zones = [];                     // {x1,x2,type}
+    let enemies = [], decorations = [];
+    let battleActive = false, battle = null;   // Undertale風バトル
+    let freezeTimer = 0, shakeTimer = 0;
+    let glitchActive = false, invert = false;
+    let stage5Final = false;            // 偽エンディング後の「ほんとうのさいご」
+    let trueGoal = null;
+    let introTimer = 0, introTitle = '', introSub = '';
+    let frameCount = 0;
+    let diedInBattle = false;
+
+    const DEATH_MSGS = {
+      1: 'ハッ‥ハッ‥ハ・・・。',
+      2: 'ハッ‥ハッ‥ハ・・・。',
+      3: 'じゅうりょくは むじひ である。',
+      4: 'ネコの たましいが くだけちった。',
+      5: '※ このさきに セーブポイントは ない。'
+    };
+    const STAGE_INTROS = {
+      3: ['STAGE 3', '「じゅうりょく、はんてん。」'],
+      4: ['STAGE 4', '「たましいの いろ」'],
+      5: ['STAGE 5', '「このゲームは あなたを しっている」']
+    };
 
     // オーディオ
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -299,6 +362,11 @@
     function playDeath() { playTone(150, 'sawtooth', 0.5, 0.1); playTone(100, 'square', 0.6, 0.1); }
     function playShoot() { playTone(800, 'square', 0.1, 0.05); }
     function playHit() { playTone(200, 'sawtooth', 0.1, 0.1); }
+    function playFlip() { playTone(500, 'triangle', 0.12, 0.07); playTone(750, 'triangle', 0.12, 0.05); }
+    function playCoin() { playTone(990, 'square', 0.08, 0.06); setTimeout(() => playTone(1320, 'square', 0.25, 0.06), 70); }
+    function playError() { playTone(880, 'square', 0.25, 0.09); setTimeout(() => playTone(660, 'square', 0.35, 0.09), 180); }
+    function playWarp() { playTone(400, 'sine', 0.1, 0.08); setTimeout(() => playTone(800, 'sine', 0.15, 0.08), 80); }
+    function playGlitch() { playTone(120 + Math.random() * 600, 'sawtooth', 0.06, 0.05); }
 
     // 入力
     const keys = { left: false, right: false };
@@ -346,7 +414,7 @@
 
     // ステージオブジェクト
     let platforms = [], hazards = [], goalObj = null, movingObjects = [], projectiles = [], pitSpikes = [];
-    let worldWidth = 0, trap = {}, trap2 = {};
+    let worldWidth = 0, trap = {}, trap2 = {}, trap3 = {}, trap4 = {}, trap5 = {};
 
     // ヘルパー
     function addSolid(x, y, w = TILE, h = TILE) { platforms.push({ x, y, w, h, type: 'solid', visible: true }); }
@@ -359,14 +427,29 @@
     function addFakeGoal(x, y) { movingObjects.push({ x, y, type: 'fake_goal', triggered: false }); }
     function addDynamicIsland(x, y, w, h, id) { platforms.push({ x, y, w, h, type: 'dynamic', id, visible: true, landed: false, fallTimer: 0, falling: false, vy: 0, flying: false, flyVx: 0 }); }
     function addOscIsland(x, y, w, h, id, axis, amp, speed) { platforms.push({ x, y, w, h, type: 'oscil', id, visible: true, baseX: x, baseY: y, axis, amp, speed, phase: Math.random() * Math.PI * 2 }); }
-    function addStaticSpike(x, y, w, h) { hazards.push({ x, y, w, h, type: 'static_spike', visible: true }); }
+    function addStaticSpike(x, y, w, h, opts = {}) { hazards.push(Object.assign({ x, y, w, h, type: 'static_spike', visible: true }, opts)); }
     function addRoamSpike(x, y, w, h, id, minX, maxX, spd) { hazards.push({ x, y, w, h, type: 'roam_spike', id, visible: true, minX, maxX, speed: spd, dir: 1 }); }
+    function addSign(x, y, text) { decorations.push({ type: 'sign', x, y, text }); }
+    function addQBlock(x, y, content) { platforms.push({ x, y, w: TILE, h: TILE, type: 'qblock', content, used: false, bounce: 0, visible: true }); }
+    function addThwomp(x, baseY, w, h) { movingObjects.push({ type: 'thwomp', x, y: baseY, baseY, w, h, state: 'idle', vy: 0, waitTimer: 0, visible: true, active: true }); }
+    function addPipePair(x, gapCenterY, gapHalf) {
+      hazards.push({ x, y: -80, w: 2 * TILE, h: gapCenterY - gapHalf + 80, type: 'pipe', visible: true });
+      hazards.push({ x, y: gapCenterY + gapHalf, w: 2 * TILE, h: GY + 6 * TILE - (gapCenterY + gapHalf), type: 'pipe', visible: true });
+    }
+    function addInvisibleBlock(x, y, w = TILE, h = TILE) { platforms.push({ x, y, w, h, type: 'invisible', visible: false }); }
+
+    function setIntro(stage) {
+      const it = STAGE_INTROS[stage];
+      if (it) { introTimer = 150; introTitle = it[0]; introSub = it[1]; }
+      else introTimer = 0;
+    }
 
     // ============================================================
     // ステージ1
     // ============================================================
     function buildStage1() {
       platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
+      enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
       trap = {
         pitSpike: false, crushBlock: false, spikeIslandMoved: false, fakeGoalFired: false,
         ceilingSpikeDropped: false, floorRiseActive: false,
@@ -401,6 +484,7 @@
     // ============================================================
     function buildStage2() {
       platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
+      enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
       trap2 = { invisHit: false, invisSpike: false, canonTimer: 0, canonIndex: 0, wallActive: false, goalRun: false };
       const S = TILE;
 
@@ -504,17 +588,7 @@
       const S = TILE, px = player.x, py = player.y;
 
       // 孔明の罠 (下や横からぶつかった時だけ落とす。上から乗った時は普通の足場に)
-      for (const p of platforms) {
-        if (p.type === 'invisible' && !p.visible) {
-          if (rectOverlap(px, py, CAT_W, CAT_H, p.x - 4, p.y - 4, p.w + 8, p.h + 8)) {
-            p.visible = true; p.type = 'solid';
-            if (py + CAT_H > p.y + 10) { // 上から乗った以外の判定（下や横から）
-              player.vy = 2; player.vx = 0; // 勢いを殺して落とす
-            }
-            playHit();
-          }
-        }
-      }
+      revealInvisibleBlocks();
 
       // 見えないブロック上からのジャンプ迎撃トゲ (4ブロック上を横切る)
       const invisBlock = platforms.find(p => p.x === 6 * S && p.y === GY - 3.5 * S);
@@ -580,6 +654,479 @@
       checkFakeGoal(); checkGoal();
     }
 
+    // 見えないブロックの共通処理 (孔明の罠)
+    function revealInvisibleBlocks() {
+      const px = player.x, py = player.y;
+      for (const p of platforms) {
+        if (p.type === 'invisible' && !p.visible) {
+          if (rectOverlap(px, py, CAT_W, CAT_H, p.x - 4, p.y - 4, p.w + 8, p.h + 8)) {
+            p.visible = true; p.type = 'solid';
+            if (py + CAT_H > p.y + 10) { // 上から乗った以外の判定（下や横から）
+              player.vy = 2; player.vx = 0; // 勢いを殺して落とす
+            }
+            playHit();
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    // ステージ3 「じゅうりょく、はんてん。」 (VVVVVV + Flappy Bird)
+    // ============================================================
+    function buildStage3() {
+      platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
+      enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
+      trap3 = {};
+      const S = TILE;
+
+      // ①イントロ (普通のふりをする)
+      for (let i = 0; i < 10; i++)addSolid(i * S, GY);
+      // 穴: 10〜12
+      for (let i = 13; i <= 17; i++)addSolid(i * S, GY);
+      addStaticSpike(15 * S, GY - 20, S, 20);
+      addSign(13 * S + 8, GY, '▲＝はんてん');
+
+      // ②重力反転回廊 (ジャンプ＝重力が逆さになる)
+      zones.push({ x1: 18 * S, x2: 47.5 * S, type: 'vvvvvv' });
+      for (let i = 18; i <= 47; i++)addSolid(i * S, GY);            // 床
+      for (let i = 18; i <= 47; i++)addSolid(i * S, GY - 6 * S);    // 天井
+      addStaticSpike(24 * S, GY - 20, 2 * S, 20);                   // 床トゲ → 天井へ逃げろ
+      addStaticSpike(28 * S, GY - 5 * S, 2 * S, 20, { down: true });// 天井トゲ → 床へ戻れ
+      addStaticSpike(33 * S, GY - 20, 2 * S, 20);
+      addStaticSpike(38 * S, GY - 5 * S, 2 * S, 20, { down: true });
+      addStaticSpike(42 * S, GY - 20, 2 * S, 20);
+
+      // ③小休止
+      for (let i = 48; i <= 52; i++)addSolid(i * S, GY);
+      addSign(49 * S, GY, 'つぎ、とぶ。');
+
+      // ④フラッピー地帯 (勝手に進む。▲ではばたけ)
+      zones.push({ x1: 53 * S, x2: 79 * S, type: 'flappy' });
+      addPipePair(57 * S, GY - 4.5 * S, 68);
+      addPipePair(63 * S, GY - 6 * S, 68);
+      addPipePair(69 * S, GY - 3.5 * S, 68);
+      addPipePair(75 * S, GY - 5.5 * S, 68);
+
+      // ⑤ゴール前 (みえない何か、ある)
+      for (let i = 79; i <= 88; i++)addSolid(i * S, GY);
+      addStaticSpike(84 * S, GY - 20, S, 20);
+      addInvisibleBlock(84 * S, GY - 3 * S);      // トゲを飛び越えると頭をぶつける
+      goalObj = { x: 87 * S, y: GY - 4 * S, w: S, h: 4 * S, poleKillH: 3 * S, flagY: GY - 4 * S, flagH: S };
+      worldWidth = 90 * S;
+    }
+
+    // ============================================================
+    // ステージ4 「たましいの いろ」 (？ブロック + ドッスン + 弾幕戦闘)
+    // ============================================================
+    function buildStage4() {
+      platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
+      enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
+      trap4 = { battleDone: false, canonTimer: 0, canonIndex: 0 };
+      const S = TILE;
+
+      // ①？ブロック地帯 (たたくと、ろくなことがない)
+      for (let i = 0; i <= 8; i++)addSolid(i * S, GY);
+      addQBlock(4 * S, GY - 4 * S, 'coin');
+      addQBlock(5 * S, GY - 4 * S, 'mushroom');
+      addQBlock(6 * S, GY - 4 * S, 'cointrap');
+      // 穴: 9〜11
+      for (let i = 12; i <= 23; i++)addSolid(i * S, GY);
+
+      // ②ドッスン地帯
+      addThwomp(15 * S - 8, GY - 5 * S, 48, 48);
+      addThwomp(19 * S - 8, GY - 5 * S, 48, 48);
+      addStaticSpike(17 * S, GY - 20, S, 20);
+
+      // 穴: 24
+      for (let i = 25; i <= 32; i++)addSolid(i * S, GY);
+
+      // ③戦闘のとびら (28*S) と バリア (戦闘に勝つまで通れない)
+      decorations.push({ type: 'door', x: 28 * S, y: GY - 3 * S });
+      platforms.push({ x: 30 * S, y: GY - 6 * S, w: S, h: 6 * S, type: 'solid', visible: true, id: 'battleBarrier' });
+
+      // ④揺れる島の谷 (穴: 33〜39)
+      addOscIsland(34 * S, GY - 2 * S, 2 * S, S, 'osc4A', 'y', 1.5 * S, 0.08);
+      addOscIsland(37 * S, GY - 3 * S, 2 * S, S, 'osc4B', 'y', 1.5 * S, 0.09);
+
+      // ⑤最終地帯 (徘徊トゲ + 偽ゴール + 偽床 + 大砲)
+      for (let i = 40; i <= 52; i++) {
+        if (i === 48 || i === 49) { addFakeFloor(i * S, GY, S, S); continue; }
+        addSolid(i * S, GY);
+      }
+      addRoamSpike(42 * S, GY - 20, S, 20, 'roam4', 41 * S, 47 * S, 2.2);
+      addFakeGoal(44 * S, GY - 4 * S);
+      goalObj = { x: 51 * S, y: GY - 4 * S, w: S, h: 4 * S, poleKillH: 3 * S, flagY: GY - 4 * S, flagH: S };
+      worldWidth = 55 * S;
+    }
+
+    // ============================================================
+    // ステージ5 「このゲームは あなたを しっている」 (メタ全開)
+    // ============================================================
+    function buildStage5() {
+      platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
+      enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
+      trap5 = { freezeDone: false, wallActive: false, ceilA: false, ceilB: false, warped: false };
+      const S = TILE;
+
+      // ①スタート地帯: 右は巨大壁。ゴールは「こっち→」…だが正解は左端の画面ワープ
+      for (let i = 0; i <= 27; i++)addSolid(i * S, GY);
+      addSolid(26 * S, GY - 8 * S, 2 * S, 8 * S);       // ジャンプでは絶対に越えられない壁
+      addSign(22 * S, GY, 'ゴールは こっち →');
+      addSign(4 * S, GY, '← しんじつ');
+
+      // ②ワープ後: 操作反転地帯
+      for (let i = 28; i <= 60; i++) {
+        if (i >= 44 && i <= 46) continue;               // 反転中に飛ぶ穴
+        addSolid(i * S, GY);
+      }
+      zones.push({ x1: 33 * S, x2: 52 * S, type: 'reversed' });
+      addSign(31 * S, GY, '？？？');
+      addStaticSpike(36 * S, GY - 20, S, 20);
+      addStaticSpike(40 * S, GY - 20, 2 * S, 20);
+      addStaticSpike(49 * S, GY - 20, S, 20);
+      addSign(53 * S, GY, 'もう だいじょうぶ');
+
+      // ③フリーズ事件 → エラーダイアログが足場になる
+      // 穴: 61 / 壁: 62〜63 (エラーダイアログの上からしか越えられない)
+      addSolid(62 * S, GY - 5 * S, 2 * S, 5 * S);
+
+      // ④グリッチ地帯 (64〜82) : 床とトゲが信用できない
+      for (let i = 64; i <= 82; i++) {
+        if (i === 68 || i === 71) { addFakeFloor(i * S, GY, S, S); continue; }
+        addSolid(i * S, GY);
+      }
+      decorations.push({ type: 'fakeSpike', x: 66 * S, y: GY - 20, w: S, h: 20 });
+      decorations.push({ type: 'fakeSpike', x: 70 * S, y: GY - 20, w: S, h: 20 });
+      addStaticSpike(73 * S, GY - 20, S, 20, { flicker: true });   // 本物 (ちらつく)
+
+      // ⑤偽のゴール (触れると「全ステージクリア！」…)
+      goalObj = { x: 79 * S, y: GY - 4 * S, w: S, h: 4 * S, poleKillH: 3 * S, flagY: GY - 4 * S, flagH: S };
+
+      // ⑥ほんとうのさいご (偽エンディング後の色反転ゾーン)
+      addSolid(85 * S, GY - 2 * S, S, S);
+      addSolid(88 * S, GY - 3 * S, S, S);
+      addSolid(91 * S, GY - 2 * S, S, S);
+      addSolid(94 * S, GY - 4 * S, S, S);
+      addSolid(97 * S, GY - 2 * S, S, S);
+      for (let i = 99; i <= 108; i++)addSolid(i * S, GY);
+      addCeilingSpike(101 * S, -S, 2 * S, S, 'final1');
+      addCeilingSpike(104 * S, -S, 2 * S, S, 'final2');
+      hazards.push({ x: 0, y: GY - 15 * S, w: 3 * S, h: 15 * S, type: 'chase_wall', visible: false, active: false, speed: 3.35 });
+      worldWidth = 110 * S;
+    }
+
+    // 偽エンディング後の世界改変
+    function applyFinalPhase() {
+      goalObj = null;                    // 偽の旗は消える
+      const S = TILE;
+      trueGoal = { x: 106 * S, y: GY - 4 * S, w: S, h: 4 * S, poleKillH: 3 * S, flagY: GY - 4 * S, flagH: S };
+      invert = true; glitchActive = true;
+      document.body.classList.add('finalZone');
+    }
+
+    function snapCamera() {
+      camera.x = Math.max(0, Math.min(player.x - canvas.width * 0.35, worldWidth - canvas.width));
+    }
+
+    // ============================================================
+    // トラップ更新 (3面)
+    // ============================================================
+    function updateTraps3() {
+      revealInvisibleBlocks();     // ゴール前の「みえないブロック」
+      checkFakeGoal(); checkGoal();
+    }
+
+    // ============================================================
+    // トラップ更新 (4面)
+    // ============================================================
+    function updateTraps4() {
+      const S = TILE, px = player.x;
+
+      // 戦闘のとびら
+      if (!trap4.battleDone && !battleActive && px > 27.5 * S && player.onGround) {
+        startBattle();
+      }
+
+      // 大砲 (最終地帯)
+      if (trap4.battleDone && px > 33 * S && px < 52 * S) {
+        trap4.canonTimer++;
+        if (trap4.canonTimer > 40) {
+          trap4.canonTimer = 0;
+          const seq = ['down', 'up', 'down', 'down', 'up'];
+          const current = seq[trap4.canonIndex % seq.length];
+          trap4.canonIndex++;
+          let yPos = current === 'up' ? GY - 2.5 * S - 10 : GY - S - 10;
+          projectiles.push({ x: 53.5 * S, y: yPos, w: 16, h: 16, vx: -6.5, vy: 0, type: 'cannonball' });
+          playShoot();
+        }
+      }
+
+      checkFakeGoal(); checkGoal();
+    }
+
+    // ============================================================
+    // トラップ更新 (5面)
+    // ============================================================
+    function updateTraps5() {
+      const S = TILE, px = player.x;
+
+      if (!stage5Final) {
+        // パックマン式・画面端ワープ (左端 → 壁のむこう側)
+        if (px < 0.8 * S && !trap5.warped) {
+          trap5.warped = true;
+          player.x = 29.5 * S; player.vx = 0;
+          snapCamera(); playWarp(); shakeTimer = 8;
+          setTimeout(() => { trap5.warped = false; }, 500);
+        }
+
+        // フリーズ事件 (偽の「応答なし」ダイアログ)
+        if (!trap5.freezeDone && px > 56 * S && player.onGround) {
+          trap5.freezeDone = true;
+          freezeTimer = 140;
+          playError();
+        }
+
+        // グリッチ地帯
+        glitchActive = px > 64 * S && px < 77 * S;
+      } else {
+        glitchActive = true;
+
+        // 迫りくる壁 (ほんとうのさいご)
+        if (!trap5.wallActive && px > 84 * S) {
+          trap5.wallActive = true;
+          for (const h of hazards) {
+            if (h.type === 'chase_wall') { h.active = true; h.visible = true; h.x = camera.x - 2 * S; }
+          }
+        }
+
+        // 天井トゲ
+        if (!trap5.ceilA && px > 99.5 * S) {
+          trap5.ceilA = true;
+          for (const m of movingObjects) { if (m.id === 'final1') { m.active = true; m.visible = true; m.y = -S; m.vy = 15; } }
+        }
+        if (!trap5.ceilB && px > 102.5 * S) {
+          trap5.ceilB = true;
+          for (const m of movingObjects) { if (m.id === 'final2') { m.active = true; m.visible = true; m.y = -S; m.vy = 15; } }
+        }
+
+        // ほんもののゴール
+        if (trueGoal) {
+          const g = trueGoal;
+          if (rectOverlap(player.x, player.y, CAT_W, CAT_H, g.x, g.flagY, g.w + 22, g.flagH)) {
+            triggerAllClear(true);
+          }
+          if (player.alive && rectOverlap(player.x, player.y, CAT_W, CAT_H, g.x + S / 2 - 3, g.flagY + g.flagH, 6, g.poleKillH)) {
+            killPlayer();   // 最後の最後までポールは敵
+          }
+        }
+      }
+
+      checkFakeGoal(); checkGoal();
+    }
+
+    // ============================================================
+    // ？ブロック (叩いた者の責任)
+    // ============================================================
+    function bonkQBlock(b) {
+      if (b.used) { playHit(); return; }
+      b.used = true; b.bounce = 8;
+      const S = TILE;
+      if (b.content === 'coin') {
+        decorations.push({ type: 'coin', x: b.x + 8, y: b.y - S, timer: 40 });
+        playCoin();
+      } else if (b.content === 'mushroom') {
+        enemies.push({ type: 'mush', x: b.x + 3, y: b.y - S + 4, w: 26, h: 26, vx: player.x < b.x ? -2.4 : 2.4, vy: 0 });
+        playTone(320, 'square', 0.2, 0.08);
+      } else if (b.content === 'cointrap') {
+        decorations.push({ type: 'coin', x: b.x + 8, y: b.y - S, timer: 30, evil: true });
+        playCoin();
+      }
+    }
+
+    function updateEnemies() {
+      for (const e of enemies) {
+        if (e.type === 'mush') {
+          e.x += e.vx; e.vy += GRAVITY; e.y += e.vy;
+          if (e.y + e.h > GY) { e.y = GY - e.h; e.vy = 0; }
+          if (player.alive && rectOverlap(player.x, player.y, CAT_W, CAT_H, e.x + 2, e.y + 2, e.w - 4, e.h - 4)) killPlayer();
+        }
+      }
+      enemies = enemies.filter(e => e.x > -100 && e.x < worldWidth + 100 && e.y < canvas.height + 200);
+
+      // コイン演出 (evilコインは落下して襲ってくる)
+      for (let i = decorations.length - 1; i >= 0; i--) {
+        const d = decorations[i];
+        if (d.type === 'coin') {
+          d.timer--; d.y -= 2;
+          if (d.timer <= 0) {
+            if (d.evil) { projectiles.push({ x: d.x, y: d.y, w: 16, h: 16, vy: 6, type: 'coin' }); playShoot(); }
+            decorations.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    // Undertale風バトル (青いたましい / ホネ / あおいこうげき)
+    // ============================================================
+    function startBattle() {
+      battleActive = true;
+      battle = {
+        t: 0,
+        hx: 0, hy: 0, hvy: 0, onGround: true,
+        bones: [], tears: [],
+        nextBone: 0, nextTear: 0, nextBlue: 0,
+        blueWarn: 0, over: false,
+        msg: '＊ ゲームが あらわれた！'
+      };
+      document.getElementById('bgm').pause();
+      playTone(220, 'square', 0.3, 0.08);
+    }
+
+    function battleBox() {
+      const BW = Math.min(380, canvas.width - 32), BH = 185;
+      const BX = (canvas.width - BW) / 2;
+      const BY = Math.max(110, canvas.height * 0.30);
+      return { BX, BY, BW, BH };
+    }
+
+    function updateBattle() {
+      const b = battle; if (!b) return;
+      const { BX, BY, BW, BH } = battleBox();
+      const HW = 14, HH = 14;
+      const floorY = BY + BH - 4 - HH;
+      b.t++;
+
+      // メッセージ進行
+      if (b.t === 100) b.msg = '＊ ネコの たましいが あおくなった！';
+      if (b.t === 180) b.msg = '';
+
+      // ハート操作 (青ソウル: 重力あり・ジャンプで避けろ)
+      if (b.t >= 100 && !b.over) {
+        if (keys.left) b.hx -= 2.6;
+        if (keys.right) b.hx += 2.6;
+        b.hx = Math.max(BX + 4, Math.min(b.hx, BX + BW - 4 - HW));
+        if (jumpPressed && b.onGround) { b.hvy = -7.8; b.onGround = false; }
+        b.hvy += 0.5; b.hy += b.hvy;
+        if (b.hy >= floorY) { b.hy = floorY; b.hvy = 0; b.onGround = true; }
+        if (b.hy < BY + 4) { b.hy = BY + 4; b.hvy = 0; }
+      } else {
+        b.hx = BX + BW / 2 - HW / 2; b.hy = floorY;
+      }
+      jumpPressed = false;
+
+      // 攻撃フェーズ
+      if (b.t >= 180 && b.t < 1500 && !b.over) {
+        // ホネ (白)
+        if (b.t >= b.nextBone) {
+          let interval, h, spd;
+          if (b.t < 560) { interval = 65; h = 38; spd = 3.2; }
+          else if (b.t < 1000) { interval = 52; h = (Math.floor(b.t / 52) % 2 === 0) ? 30 : 55; spd = 3.8; }
+          else { interval = 75; h = 40; spd = 4.6; }
+          const fromLeft = b.t >= 560 && (Math.floor(b.t / interval) % 2 === 0);
+          b.bones.push({
+            x: fromLeft ? BX + 2 : BX + BW - 14,
+            y: BY + BH - 4 - h, w: 12, h,
+            vx: fromLeft ? spd : -spd, blue: false
+          });
+          b.nextBone = b.t + interval;
+          playTone(600, 'triangle', 0.05, 0.04);
+        }
+        // なみだ (上から降る)
+        if (b.t >= 560 && b.t < 1000 && b.t >= b.nextTear) {
+          b.tears.push({ x: BX + 20 + Math.random() * (BW - 40), y: BY + 6, w: 8, h: 10, vy: 2.8 });
+          b.nextTear = b.t + 90;
+        }
+        // あおいホネ (うごくな！)
+        if (b.t >= 1000) {
+          if (b.nextBlue === 0) b.nextBlue = b.t + 60;
+          if (b.t === b.nextBlue - 45) { b.blueWarn = 45; playTone(180, 'sine', 0.4, 0.1); }
+          if (b.t >= b.nextBlue) {
+            b.bones.push({ x: BX + BW - 14, y: BY + 4, w: 12, h: BH - 8, vx: -2.6, blue: true });
+            b.nextBlue = b.t + 150;
+          }
+        }
+      }
+      if (b.blueWarn > 0) b.blueWarn--;
+
+      // ホネ・なみだの移動と当たり
+      for (const bone of b.bones) {
+        bone.x += bone.vx;
+        if (player.alive && rectOverlap(b.hx + 2, b.hy + 2, HW - 4, HH - 4, bone.x, bone.y, bone.w, bone.h)) {
+          if (bone.blue) {
+            const moving = keys.left || keys.right || !b.onGround;
+            if (moving) { battleDeath(); return; }
+          } else {
+            battleDeath(); return;
+          }
+        }
+      }
+      b.bones = b.bones.filter(x => x.x > BX - 20 && x.x < BX + BW + 20);
+      for (const t of b.tears) {
+        t.y += t.vy;
+        if (player.alive && rectOverlap(b.hx + 2, b.hy + 2, HW - 4, HH - 4, t.x, t.y, t.w, t.h)) { battleDeath(); return; }
+      }
+      b.tears = b.tears.filter(t => t.y < BY + BH - 6);
+
+      // 生存クリア
+      if (b.t === 1500) {
+        b.bones = []; b.tears = [];
+        b.msg = '＊ ゲームは ネコを みのがした。';
+        b.over = true;
+        playCoin();
+      }
+      if (b.over && b.t > 1620) {
+        battleActive = false; battle = null;
+        trap4.battleDone = true;
+        platforms = platforms.filter(p => p.id !== 'battleBarrier');   // バリア解除
+        restartBgm();
+      }
+    }
+
+    function battleDeath() {
+      diedInBattle = true;
+      battleActive = false; battle = null;
+      killPlayer();
+    }
+
+    // ============================================================
+    // 偽エンディング → 「うそだよ。」
+    // ============================================================
+    function startFakeClear() {
+      state = 'fakeclear';
+      const scr = document.getElementById('clearScreen');
+      const title = document.getElementById('clearTitle');
+      const msg = document.getElementById('clearMsg');
+      const btn = document.getElementById('clearBtn');
+      btn.style.display = 'none';
+      scr.classList.remove('dark');
+      title.textContent = '全ステージクリア！';
+      msg.textContent = '総死亡回数 : ' + deathCount;
+      scr.style.display = 'flex';
+      playCoin();
+
+      setTimeout(() => {
+        title.textContent = '全ステージク%リア…？';
+        msg.textContent = '……';
+        scr.classList.add('dark');
+        playGlitch(); playGlitch();
+      }, 1600);
+      setTimeout(() => {
+        title.textContent = 'うそだよ。';
+        msg.textContent = 'ほんとうの さいごが まっている。';
+        playError();
+      }, 2600);
+      setTimeout(() => {
+        scr.style.display = 'none';
+        scr.classList.remove('dark');
+        stage5Final = true;
+        applyFinalPhase();
+        resetPlayer(78 * TILE, 380);
+        snapCamera();
+        state = 'playing';
+      }, 4300);
+    }
+
     function checkFakeGoal() {
       const S = TILE, px = player.x, py = player.y;
       for (const m of movingObjects) {
@@ -594,11 +1141,14 @@
     }
 
     function checkGoal() {
-      if (!goalObj) return;
+      if (!goalObj || state !== 'playing' || !player.alive || IS_DEAD) return;
       const g = goalObj, S = TILE;
       // 旗(最上部) → クリア
       if (rectOverlap(player.x, player.y, CAT_W, CAT_H, g.x, g.flagY, g.w + 22, g.flagH)) {
-        if (currentStage === 1) triggerStageClear(); else triggerAllClear();
+        if (currentStage === 5) { if (!stage5Final) startFakeClear(); }
+        else if (currentStage < STAGE_MAX) triggerStageClear();
+        else triggerAllClear(false);
+        return;
       }
       // ポール本体 → 死亡
       if (player.alive && rectOverlap(player.x, player.y, CAT_W, CAT_H, g.x + S / 2 - 3, g.flagY + g.flagH, 6, g.poleKillH)) {
@@ -637,6 +1187,17 @@
         if (m.type === 'floor_spike') {
           if (m.y > m.targetY) m.y -= 6; else m.y = m.targetY;
           if (player.alive && rectOverlap(player.x, player.y, CAT_W, CAT_H, m.x, m.y, m.w, m.h)) killPlayer();
+        }
+        if (m.type === 'thwomp') {
+          const pcx = player.x + CAT_W / 2, tcx = m.x + m.w / 2;
+          if (m.state === 'idle' && Math.abs(pcx - tcx) < 1.6 * TILE && player.y > m.y) { m.state = 'fall'; m.vy = 14; }
+          if (m.state === 'fall') {
+            m.y += m.vy;
+            if (m.y + m.h >= GY) { m.y = GY - m.h; m.state = 'wait'; m.waitTimer = 40; shakeTimer = 5; playTone(90, 'square', 0.2, 0.12); }
+          }
+          if (m.state === 'wait') { m.waitTimer--; if (m.waitTimer <= 0) m.state = 'rise'; }
+          if (m.state === 'rise') { m.y -= 2; if (m.y <= m.baseY) { m.y = m.baseY; m.state = 'idle'; } }
+          if (player.alive && rectOverlap(player.x + 2, player.y + 2, CAT_W - 4, CAT_H - 4, m.x, m.y, m.w, m.h)) killPlayer();
         }
       }
       for (const p of projectiles) {
@@ -692,15 +1253,21 @@
         if (!rectOverlap(player.x, player.y, CAT_W, CAT_H, b.x, b.y, b.w, b.h)) continue;
         const ox = Math.min(player.x + CAT_W, b.x + b.w) - Math.max(player.x, b.x);
         const oy = Math.min(player.y + CAT_H, b.y + b.h) - Math.max(player.y, b.y);
-        
+
         let resolveV = ox >= oy;
         // すり抜け防止: 落下中かつY軸のめり込みが浅い場合は優先的に上に乗せる
         if (b.type === 'oscil' && player.vy >= 0 && oy < 24) resolveV = true;
 
         if (resolveV) {
           const topThresh = b.type === 'oscil' ? 24 : 2;
-          if (player.y + CAT_H - player.vy <= b.y + topThresh) { player.y = b.y - CAT_H; player.vy = 0; player.onGround = true; }
-          else { player.y = b.y + b.h; player.vy = 2; }
+          if (gravityDir === 1) {
+            if (player.y + CAT_H - player.vy <= b.y + topThresh) { player.y = b.y - CAT_H; player.vy = 0; player.onGround = true; }
+            else { player.y = b.y + b.h; player.vy = 2; if (b.type === 'qblock') bonkQBlock(b); }
+          } else {
+            // 反転重力: 天井ブロックの下面が「地面」
+            if (player.y - player.vy >= b.y + b.h - topThresh) { player.y = b.y + b.h; player.vy = 0; player.onGround = true; }
+            else { player.y = b.y - CAT_H; player.vy = -2; }
+          }
         } else {
           if (player.x + CAT_W / 2 < b.x + b.w / 2) player.x = b.x - CAT_W; else player.x = b.x + b.w;
           player.vx = 0;
@@ -713,56 +1280,109 @@
     const deathCountEl = document.getElementById('deathCount');
     const stageLabelEl = document.getElementById('stageLabel');
 
+    const BUILDERS = { 1: buildStage1, 2: buildStage2, 3: buildStage3, 4: buildStage4, 5: buildStage5 };
+    const TRAP_FNS = { 1: updateTraps1, 2: updateTraps2, 3: updateTraps3, 4: updateTraps4, 5: updateTraps5 };
+    const SPAWNS = { 1: [60, 380], 2: [60, 380], 3: [60, 380], 4: [60, 380], 5: [17 * TILE, 380] };
+
+    let deathTimer1 = null, deathTimer2 = null;
     function killPlayer() {
       if (!player.alive || IS_DEAD) return;
       playDeath();
       document.getElementById('bgm').pause(); // BGM停止
       player.alive = false; player.vx = 0; player.vy = -8;
       deathCount++; deathCountEl.textContent = '死亡 : ' + deathCount;
-      IS_DEAD = true; deathMsg.classList.add('show');
-      setTimeout(() => { deathMsg.classList.remove('show'); setTimeout(() => respawn(), 300); }, 1600);
+      IS_DEAD = true;
+      deathMsg.textContent = diedInBattle ? 'ゲームは わらっている。' : (DEATH_MSGS[currentStage] || 'ハッ‥ハッ‥ハ・・・。');
+      diedInBattle = false;
+      deathMsg.classList.add('show');
+      deathTimer1 = setTimeout(() => { deathMsg.classList.remove('show'); deathTimer2 = setTimeout(() => respawn(), 300); }, 1600);
+    }
+    function cancelPendingDeath() {
+      clearTimeout(deathTimer1); clearTimeout(deathTimer2);
+      IS_DEAD = false;
+      deathMsg.classList.remove('show');
     }
 
     function respawn() {
-      IS_DEAD = false; pitSpikes = [];
-      if (currentStage === 1) { buildStage1(); resetPlayer(60, 380); }
-      else { buildStage2(); resetPlayer(60, 380); }
-      camera.x = 0;
+      IS_DEAD = false; pitSpikes = []; projectiles = [];
+      gravityDir = 1; activeMode = 'normal'; freezeTimer = 0; battleActive = false; battle = null;
+      BUILDERS[currentStage]();
+      if (currentStage === 5 && stage5Final) {
+        applyFinalPhase();
+        resetPlayer(78 * TILE, 380);
+        snapCamera();
+      } else {
+        document.body.classList.remove('finalZone');
+        const sp = SPAWNS[currentStage];
+        resetPlayer(sp[0], sp[1]);
+        camera.x = 0;
+      }
       restartBgm(); // BGM再スタート
+    }
+
+    function startStage(n) {
+      cancelPendingDeath();
+      currentStage = n;
+      stageLabelEl.textContent = 'STAGE ' + n;
+      pitSpikes = []; projectiles = [];
+      gravityDir = 1; activeMode = 'normal'; freezeTimer = 0; battleActive = false; battle = null;
+      stage5Final = false;
+      document.body.classList.remove('finalZone');
+      BUILDERS[n]();
+      const sp = SPAWNS[n];
+      resetPlayer(sp[0], sp[1]);
+      camera.x = 0; state = 'playing';
+      setIntro(n);
     }
 
     function triggerStageClear() {
       state = 'stageclear';
-      document.getElementById('stageClearScreen').style.display = 'flex';
+      document.getElementById('stageClearTitle').textContent = 'STAGE ' + currentStage + ' クリア！';
       document.getElementById('stageClearMsg').textContent = '死亡回数 : ' + deathCount;
+      document.getElementById('nextStageBtn').textContent = 'STAGE ' + (currentStage + 1) + ' へ';
+      document.getElementById('stageClearScreen').style.display = 'flex';
     }
 
-    function goStage2() {
+    function goNextStage() {
       initAudio(); restartBgm();
       document.getElementById('stageClearScreen').style.display = 'none';
-      currentStage = 2; stageLabelEl.textContent = 'STAGE 2';
-      pitSpikes = []; buildStage2(); resetPlayer(60, 380); camera.x = 0; state = 'playing';
+      startStage(currentStage + 1);
     }
 
-    function triggerAllClear() {
+    function triggerAllClear(real) {
       state = 'clear';
-      document.getElementById('clearScreen').style.display = 'flex';
-      document.getElementById('clearMsg').textContent = '総死亡回数 : ' + deathCount;
+      const scr = document.getElementById('clearScreen');
+      const title = document.getElementById('clearTitle');
+      const msg = document.getElementById('clearMsg');
+      const btn = document.getElementById('clearBtn');
+      btn.style.display = '';
+      if (real) {
+        scr.classList.add('dark');
+        title.textContent = 'ほんとうの 全ステージクリア！';
+        msg.textContent = '総死亡回数 : ' + deathCount + ' ／ きみは ゲームに かった。';
+      } else {
+        scr.classList.remove('dark');
+        title.textContent = '全ステージクリア！';
+        msg.textContent = '総死亡回数 : ' + deathCount;
+      }
+      scr.style.display = 'flex';
     }
 
     function restartGame() {
       initAudio(); restartBgm();
-      deathCount = 0; currentStage = 1;
-      deathCountEl.textContent = '死亡 : 0'; stageLabelEl.textContent = 'STAGE 1';
+      deathCount = 0;
+      deathCountEl.textContent = '死亡 : 0';
       document.getElementById('clearScreen').style.display = 'none';
-      pitSpikes = []; buildStage1(); resetPlayer(60, 380); camera.x = 0; state = 'playing';
+      document.getElementById('clearScreen').classList.remove('dark');
+      startStage(1);
     }
 
     function startGame() {
       initAudio(); restartBgm();
       document.getElementById('titleScreen').style.display = 'none';
-      currentStage = 1; stageLabelEl.textContent = 'STAGE 1';
-      pitSpikes = []; buildStage1(); resetPlayer(60, 380); camera.x = 0; state = 'playing';
+      deathCount = 0;
+      deathCountEl.textContent = '死亡 : 0';
+      startStage(1);
     }
 
     // ============================================================
@@ -770,18 +1390,82 @@
     // ============================================================
     function drawBlock(b) {
       if (!b.visible) return;
-      const px = Math.floor(b.x - camera.x), py = Math.floor(b.y);
+      const bounce = b.bounce || 0;
+      if (b.bounce) b.bounce--;
+      const px = Math.floor(b.x - camera.x), py = Math.floor(b.y - bounce);
       if (px > canvas.width + b.w || px < -b.w) return;
       ctx.save();
+      if (b.type === 'qblock') {
+        ctx.fillStyle = b.used ? '#4a4a4a' : '#222';
+        ctx.fillRect(px, py, b.w, b.h);
+        ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.strokeRect(px + 1, py + 1, b.w - 2, b.h - 2);
+        if (!b.used) {
+          ctx.fillStyle = '#fff'; ctx.font = 'bold 20px "Courier New", monospace'; ctx.textAlign = 'center';
+          ctx.fillText('?', px + b.w / 2, py + b.h - 9);
+          ctx.textAlign = 'left';
+        }
+        ctx.restore(); return;
+      }
+      if (b.isDialog) {
+        ctx.restore();
+        drawDialogWindow(px, py, b.w, 2.5 * TILE, true);
+        return;
+      }
       ctx.fillStyle = '#222'; ctx.fillRect(px, py, b.w, b.h);
       ctx.fillStyle = '#3a3a3a';
       for (let i = 2; i < b.w - 2; i += 6)for (let j = 2; j < b.h - 2; j += 6)ctx.fillRect(px + i, py + j, 2, 2);
       ctx.restore();
     }
 
+    function drawDialogWindow(px, py, w, h, small) {
+      ctx.save();
+      ctx.fillStyle = '#e8e8e8'; ctx.fillRect(px, py, w, h);
+      ctx.strokeStyle = '#444'; ctx.lineWidth = 2; ctx.strokeRect(px, py, w, h);
+      ctx.fillStyle = '#8a8a8a'; ctx.fillRect(px, py, w, 16);
+      ctx.fillStyle = '#fff'; ctx.font = '9px "Courier New", monospace'; ctx.textAlign = 'left';
+      ctx.fillText('ねこのアクション.exe', px + 4, py + 11);
+      ctx.fillStyle = '#c33'; ctx.fillRect(px + w - 14, py + 3, 10, 10);
+      ctx.fillStyle = '#fff'; ctx.font = '8px monospace'; ctx.fillText('×', px + w - 12, py + 11);
+      ctx.fillStyle = '#333'; ctx.font = '9px "Courier New", monospace';
+      ctx.fillText('おうとうしていません', px + 8, py + 32);
+      if (!small) {
+        ctx.fillText('このゲームを しゅうりょう しますか？', px + 8, py + 48);
+      }
+      ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+      ctx.strokeRect(px + 8, py + h - 22, 40, 15); ctx.strokeRect(px + 54, py + h - 22, 40, 15);
+      ctx.fillStyle = '#333'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('まつ', px + 28, py + h - 11); ctx.fillText('おわる', px + 74, py + h - 11);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+
+    function drawFreezeDialog() {
+      ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const w = 300, h = 130;
+      const px = (canvas.width - w) / 2, py = (canvas.height - h) / 2 - 40;
+      ctx.save();
+      ctx.fillStyle = '#e8e8e8'; ctx.fillRect(px, py, w, h);
+      ctx.strokeStyle = '#444'; ctx.lineWidth = 2; ctx.strokeRect(px, py, w, h);
+      ctx.fillStyle = '#8a8a8a'; ctx.fillRect(px, py, w, 24);
+      ctx.fillStyle = '#fff'; ctx.font = '12px "Courier New", monospace'; ctx.textAlign = 'left';
+      ctx.fillText('ねこのアクション.exe', px + 8, py + 16);
+      ctx.fillStyle = '#c33'; ctx.fillRect(px + w - 20, py + 5, 14, 14);
+      ctx.fillStyle = '#fff'; ctx.fillText('×', px + w - 17, py + 16);
+      ctx.fillStyle = '#333'; ctx.font = '12px "Courier New", monospace';
+      ctx.fillText('「ねこのアクション」は', px + 16, py + 50);
+      ctx.fillText('おうとうしていません。', px + 16, py + 68);
+      ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+      ctx.strokeRect(px + 50, py + h - 34, 80, 22); ctx.strokeRect(px + 170, py + h - 34, 80, 22);
+      ctx.font = '11px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('まつ', px + 90, py + h - 19); ctx.fillText('おわる', px + 210, py + h - 19);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+
     function drawHazards() {
       for (const h of hazards) {
         if (!h.visible) continue;
+        if (h.flicker && frameCount % 50 >= 34) continue;   // 描画だけ消える。当たり判定は消えない
         const px = Math.floor(h.x - camera.x), py = Math.floor(h.y);
         if (h.type === 'chase_wall') {
           ctx.fillStyle = '#111'; ctx.fillRect(px, py, h.w, h.h);
@@ -794,6 +1478,15 @@
           drawSpikeShape(px, py + h.h - 12, h.w, 12, false); // 下向きトゲ
           ctx.fillStyle = '#333';
           ctx.fillRect(px, py + 12, h.w, h.h - 24); // 真ん中
+        } else if (h.type === 'pipe') {
+          ctx.fillStyle = '#222'; ctx.fillRect(px + 4, py, h.w - 8, h.h);
+          ctx.fillStyle = '#3a3a3a';
+          for (let j = 6; j < h.h - 6; j += 10) ctx.fillRect(px + 8, py + j, h.w - 16, 3);
+          // 開口部のふち
+          const rimY = h.y < 0 ? py + h.h - 14 : py;
+          ctx.fillStyle = '#181818'; ctx.fillRect(px, rimY, h.w, 14);
+        } else if (h.down) {
+          drawSpikeShape(px, py, h.w, h.h, false);
         } else {
           drawSpikeShape(px, py, h.w, h.h, true);
         }
@@ -805,12 +1498,26 @@
         if (m.type === 'ceiling_spike' && m.visible) drawSpikeShape(m.x - camera.x, m.y, m.w, m.h, true);
         if (m.type === 'floor_spike' && m.visible) drawSpikeShape(m.x - camera.x, m.y, m.w, m.h, false);
         if (m.type === 'fake_goal') drawGoalPole(m.x - camera.x, m.y, true);
+        if (m.type === 'thwomp') {
+          const px = Math.floor(m.x - camera.x), py = Math.floor(m.y);
+          ctx.fillStyle = '#161616'; ctx.fillRect(px, py, m.w, m.h);
+          ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 2; ctx.strokeRect(px + 1, py + 1, m.w - 2, m.h - 2);
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(px + 9, py + 12, 8, 8); ctx.fillRect(px + m.w - 17, py + 12, 8, 8);
+          ctx.fillStyle = '#161616';
+          ctx.fillRect(px + 12, py + 15, 3, 3); ctx.fillRect(px + m.w - 14, py + 15, 3, 3);
+          ctx.fillStyle = '#fff'; ctx.fillRect(px + 12, py + m.h - 16, m.w - 24, 3);
+        }
       }
       for (const p of projectiles) {
         const px = Math.floor(p.x - camera.x);
         if (p.type === 'cannonball') {
           ctx.fillStyle = '#222';
           ctx.beginPath(); ctx.arc(px + p.w / 2, p.y + p.h / 2, p.w / 2, 0, Math.PI * 2); ctx.fill();
+        } else if (p.type === 'coin') {
+          ctx.strokeStyle = '#222'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(px + p.w / 2, p.y + p.h / 2, p.w / 2 - 1, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = '#222'; ctx.fillRect(px + p.w / 2 - 1, p.y + 3, 2, p.h - 6);
         } else {
           ctx.fillStyle = '#333';
           ctx.beginPath(); ctx.moveTo(px + p.w / 2, p.y + p.h); ctx.lineTo(px, p.y); ctx.lineTo(px + p.w, p.y); ctx.closePath(); ctx.fill();
@@ -820,6 +1527,55 @@
         const px = Math.floor(s.x - camera.x);
         ctx.fillStyle = '#333';
         ctx.beginPath(); ctx.moveTo(px + s.w / 2, s.y); ctx.lineTo(px, s.y + s.h); ctx.lineTo(px + s.w, s.y + s.h); ctx.closePath(); ctx.fill();
+      }
+    }
+
+    function drawEnemies() {
+      for (const e of enemies) {
+        if (e.type === 'mush') {
+          const px = Math.floor(e.x - camera.x), py = Math.floor(e.y);
+          ctx.fillStyle = '#222';
+          ctx.beginPath(); ctx.arc(px + e.w / 2, py + 12, e.w / 2, Math.PI, 0); ctx.fill();
+          ctx.fillRect(px, py + 10, e.w, 5);
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(px + 4, py + 4, 5, 5); ctx.fillRect(px + e.w - 9, py + 4, 5, 5);
+          ctx.fillStyle = '#888'; ctx.fillRect(px + 6, py + 15, e.w - 12, 11);
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(px + 8, py + 18, 3, 4); ctx.fillRect(px + e.w - 11, py + 18, 3, 4);
+        }
+      }
+    }
+
+    function drawDecorations() {
+      for (const d of decorations) {
+        const px = Math.floor(d.x - camera.x);
+        if (px < -200 || px > canvas.width + 200) continue;
+        if (d.type === 'sign') {
+          const py = Math.floor(d.y);
+          ctx.fillStyle = '#555'; ctx.fillRect(px + 26, py - 26, 5, 26);
+          ctx.fillStyle = '#f4f4f4'; ctx.fillRect(px - 6, py - 48, 70, 24);
+          ctx.strokeStyle = '#777'; ctx.lineWidth = 2; ctx.strokeRect(px - 6, py - 48, 70, 24);
+          ctx.fillStyle = '#333'; ctx.font = '10px "Courier New", monospace'; ctx.textAlign = 'center';
+          ctx.fillText(d.text, px + 29, py - 32, 66);
+          ctx.textAlign = 'left';
+        }
+        if (d.type === 'door') {
+          const py = Math.floor(d.y);
+          const open = trap4 && trap4.battleDone;
+          ctx.fillStyle = open ? '#999' : '#181818';
+          ctx.fillRect(px, py, 1.4 * TILE, 3 * TILE);
+          ctx.beginPath(); ctx.arc(px + 0.7 * TILE, py, 0.7 * TILE, Math.PI, 0); ctx.fill();
+          if (!open) { ctx.fillStyle = '#888'; ctx.beginPath(); ctx.arc(px + 1.1 * TILE, py + 1.5 * TILE, 3, 0, Math.PI * 2); ctx.fill(); }
+        }
+        if (d.type === 'fakeSpike') {
+          if (frameCount % 50 < 34) drawSpikeShape(px, Math.floor(d.y), d.w, d.h, true);
+        }
+        if (d.type === 'coin') {
+          const py = Math.floor(d.y);
+          ctx.strokeStyle = '#222'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(px + 8, py + 8, 7, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = '#222'; ctx.fillRect(px + 7, py + 3, 2, 10);
+        }
       }
     }
 
@@ -841,16 +1597,20 @@
     }
 
     function drawGoal() {
-      if (!goalObj) return;
-      const g = goalObj, px = Math.floor(g.x - camera.x), py = Math.floor(g.y);
-      ctx.fillStyle = '#555'; ctx.fillRect(px + TILE / 2 - 3, py, 6, g.h);
-      ctx.fillStyle = '#111';
-      ctx.beginPath(); ctx.moveTo(px + TILE / 2 + 3, py + 4); ctx.lineTo(px + TILE / 2 + 22, py + 14); ctx.lineTo(px + TILE / 2 + 3, py + 24); ctx.closePath(); ctx.fill();
+      for (const g of [goalObj, trueGoal]) {
+        if (!g) continue;
+        const px = Math.floor(g.x - camera.x), py = Math.floor(g.y);
+        ctx.fillStyle = '#555'; ctx.fillRect(px + TILE / 2 - 3, py, 6, g.h);
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.moveTo(px + TILE / 2 + 3, py + 4); ctx.lineTo(px + TILE / 2 + 22, py + 14); ctx.lineTo(px + TILE / 2 + 3, py + 24); ctx.closePath(); ctx.fill();
+      }
     }
 
     function drawCat(p) {
       const x = Math.floor(p.x - camera.x), y = Math.floor(p.y);
       ctx.save();
+      // 反転重力中は上下逆さまに描く
+      if (gravityDir === -1) { ctx.translate(x + CAT_W / 2, y + CAT_H / 2); ctx.scale(1, -1); ctx.translate(-(x + CAT_W / 2), -(y + CAT_H / 2)); }
       if (!p.facingRight) { ctx.translate(x + CAT_W / 2, y + CAT_H / 2); ctx.scale(-1, 1); ctx.translate(-(x + CAT_W / 2), -(y + CAT_H / 2)); }
       ctx.fillStyle = '#111';
       ctx.fillRect(x + 3, y + 10, 20, 16); ctx.fillRect(x + 5, y + 2, 16, 14);
@@ -878,6 +1638,123 @@
       for (let gy = 0; gy < canvas.height; gy += G) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(canvas.width, gy); ctx.stroke(); }
     }
 
+    // ============================================================
+    // バトル描画 (Undertale風)
+    // ============================================================
+    const INVADER = ['..X.....X..', '...X...X...', '..XXXXXXX..', '.XX.XXX.XX.', 'XXXXXXXXXXX', 'X.XXXXXXX.X', 'X.X.....X.X', '...XX.XX...'];
+    function drawInvader(cx, cy) {
+      const sc = 4, ox = cx - INVADER[0].length * sc / 2;
+      // ときどきグリッチる
+      const jx = Math.random() < 0.05 ? (Math.random() - 0.5) * 8 : 0;
+      ctx.fillStyle = '#fff';
+      for (let r = 0; r < INVADER.length; r++)
+        for (let c = 0; c < INVADER[r].length; c++)
+          if (INVADER[r][c] === 'X') ctx.fillRect(ox + c * sc + jx, cy + r * sc, sc, sc);
+    }
+
+    function drawHeart(x, y, blue) {
+      ctx.fillStyle = blue ? '#3a6ff0' : '#f03a3a';
+      ctx.beginPath();
+      ctx.arc(x + 4, y + 4, 4, Math.PI, 0);
+      ctx.arc(x + 10, y + 4, 4, Math.PI, 0);
+      ctx.lineTo(x + 14, y + 6);
+      ctx.lineTo(x + 7, y + 14);
+      ctx.lineTo(x, y + 6);
+      ctx.closePath(); ctx.fill();
+    }
+
+    function drawBone(bone) {
+      ctx.fillStyle = bone.blue ? '#3a6ff0' : '#fff';
+      ctx.fillRect(bone.x + 3, bone.y + 4, bone.w - 6, bone.h - 8);
+      ctx.beginPath();
+      ctx.arc(bone.x + 3, bone.y + 4, 4, 0, Math.PI * 2);
+      ctx.arc(bone.x + bone.w - 3, bone.y + 4, 4, 0, Math.PI * 2);
+      ctx.arc(bone.x + 3, bone.y + bone.h - 4, 4, 0, Math.PI * 2);
+      ctx.arc(bone.x + bone.w - 3, bone.y + bone.h - 4, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawBattle() {
+      const b = battle; if (!b) return;
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const { BX, BY, BW, BH } = battleBox();
+      drawInvader(canvas.width / 2, BY - 70);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.strokeRect(BX, BY, BW, BH);
+      if (b.msg) {
+        ctx.fillStyle = '#fff'; ctx.font = '14px "Courier New", monospace'; ctx.textAlign = 'left';
+        ctx.fillText(b.msg, BX + 14, BY + 28);
+      }
+      if (b.blueWarn > 0 && b.blueWarn % 10 < 5) {
+        ctx.fillStyle = '#3a6ff0'; ctx.font = 'bold 16px "Courier New", monospace'; ctx.textAlign = 'center';
+        ctx.fillText('あおは うごくな！', canvas.width / 2, BY - 14);
+        ctx.textAlign = 'left';
+      }
+      for (const bone of b.bones) drawBone(bone);
+      ctx.fillStyle = '#fff';
+      for (const t of b.tears) { ctx.beginPath(); ctx.ellipse(t.x + 4, t.y + 5, 4, 5, 0, 0, Math.PI * 2); ctx.fill(); }
+      drawHeart(b.hx, b.hy, b.t >= 100);
+      // ステータスとメニュー
+      const my = BY + BH + 26;
+      ctx.fillStyle = '#fff'; ctx.font = '13px "Courier New", monospace'; ctx.textAlign = 'left';
+      ctx.fillText('ネコ   LV 1', BX, my);
+      ctx.fillText('HP 1 / 1', BX + 160, my);
+      const labels = ['たたかう', 'こうどう', 'アイテム', 'みのがす'];
+      const bw2 = (BW - 3 * 10) / 4;
+      for (let i = 0; i < 4; i++) {
+        const bx2 = BX + i * (bw2 + 10), by2 = my + 12;
+        ctx.strokeStyle = '#e8871e'; ctx.lineWidth = 2; ctx.strokeRect(bx2, by2, bw2, 34);
+        ctx.fillStyle = '#e8871e'; ctx.font = '12px "Courier New", monospace'; ctx.textAlign = 'center';
+        ctx.fillText(labels[i], bx2 + bw2 / 2, by2 + 22);
+      }
+      ctx.textAlign = 'left';
+    }
+
+    // グリッチ演出
+    function drawGlitchFx() {
+      if (Math.random() < 0.14) {
+        const y = Math.random() * canvas.height, h = 8 + Math.random() * 30;
+        const dx = (Math.random() - 0.5) * 46;
+        ctx.drawImage(canvas, 0, y, canvas.width, h, dx, y, canvas.width, h);
+        if (Math.random() < 0.3) playGlitch();
+      }
+      if (Math.random() < 0.10) {
+        ctx.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.4)';
+        ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 20 + Math.random() * 90, 3 + Math.random() * 10);
+      }
+    }
+
+    function drawIntro() {
+      if (introTimer <= 0) return;
+      introTimer--;
+      const a = Math.min(1, introTimer / 30);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = invert ? '#eee' : '#111';
+      ctx.font = 'bold 30px "Courier New", monospace'; ctx.textAlign = 'center';
+      ctx.fillText(introTitle, canvas.width / 2, canvas.height * 0.32);
+      ctx.font = '16px "Courier New", monospace';
+      ctx.fillText(introSub, canvas.width / 2, canvas.height * 0.32 + 34);
+      ctx.restore();
+      ctx.textAlign = 'left';
+    }
+
+    function drawWorld() {
+      ctx.save();
+      if (shakeTimer > 0) { shakeTimer--; ctx.translate((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 8); }
+      drawBackground();
+      drawDecorations();
+      for (const b of platforms) drawBlock(b);
+      drawHazards(); drawMovingObjects(); drawEnemies(); drawGoal(); drawCat(player);
+      ctx.restore();
+      if (glitchActive) drawGlitchFx();
+      if (invert) {
+        ctx.globalCompositeOperation = 'difference';
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      drawIntro();
+    }
+
     function drawTitleCat() {
       const tc = document.getElementById('titleCatCanvas'), tctx = tc.getContext('2d');
       tctx.clearRect(0, 0, 64, 64);
@@ -889,45 +1766,122 @@
       p.fillStyle = '#111'; p.fillRect(x + 4, y + 24, 7, 6); p.fillRect(x + 15, y + 24, 7, 6); p.fillRect(x + 22, y + 18, 4, 3); p.fillRect(x + 25, y + 15, 3, 4);
     }
 
+    // ゾーン判定 (ステージ3〜5のモード切替)
+    function zoneAt(cx) {
+      for (const z of zones) if (cx >= z.x1 && cx <= z.x2) return z;
+      return null;
+    }
+    function onModeChange(from, to) {
+      if (to === 'flappy') { player.vy = -5; playFlip(); }
+      if (from === 'vvvvvv') gravityDir = 1;
+    }
+
+    // STAGE 5のラベルはときどき壊れる
+    const GLITCH_LABELS = ['STAGE 5', 'ST▒GE 5', 'STAGE ▓', 'SGATE 5', 'STAGE ∅', 'ST4GE 5', 'STAGE 5'];
+
     // メインループ
     let lastTime = 0;
     function gameLoop(ts) {
       requestAnimationFrame(gameLoop);
       const dt = Math.min(ts - lastTime, 32); lastTime = ts;
+      frameCount++;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (state !== 'playing') return;
 
-      if (player.alive && !IS_DEAD) {
-        if (keys.left) { player.vx = -MOVE_SPEED; player.facingRight = false; }
-        else if (keys.right) { player.vx = MOVE_SPEED; player.facingRight = true; }
-        else player.vx *= 0.7;
-        if (jumpPressed && player.onGround) { player.vy = JUMP_FORCE; player.onGround = false; }
+      // STAGE 5: HUDが信用できない
+      if (currentStage === 5 && frameCount % 30 === 0) {
+        stageLabelEl.textContent = GLITCH_LABELS[Math.floor(Math.random() * GLITCH_LABELS.length)];
+      }
+
+      // バトル中は世界が止まる
+      if (battleActive) {
+        updateBattle();
+        if (battleActive) { drawBattle(); return; }
+      }
+
+      // フリーズ事件 (偽の応答なし)
+      if (freezeTimer > 0) {
+        freezeTimer--;
         jumpPressed = false;
-        player.vy += GRAVITY; player.x += player.vx; player.y += player.vy;
-        resolvePlatforms();
+        drawWorld();
+        drawFreezeDialog();
+        if (freezeTimer === 0) {
+          // ダイアログが世界に落ちてきて足場になる
+          platforms.push({ x: 58 * TILE, y: GY - 3 * TILE, w: 3.5 * TILE, h: TILE, type: 'solid', visible: true, isDialog: true });
+          shakeTimer = 10;
+          playTone(90, 'square', 0.3, 0.12);
+        }
+        return;
+      }
+
+      if (player.alive && !IS_DEAD) {
+        const zc = zoneAt(player.x + CAT_W / 2);
+        const mode = zc ? zc.type : 'normal';
+        if (mode !== activeMode) { onModeChange(activeMode, mode); activeMode = mode; }
+
+        if (mode === 'flappy') {
+          // Flappy地帯: 勝手に進む。▲ではばたく
+          player.vx = FLAP_SPEED; player.facingRight = true;
+          if (jumpPressed) { player.vy = FLAP_IMPULSE; }
+          jumpPressed = false;
+          player.vy = Math.min(player.vy + FLAP_GRAV, 9);
+          player.x += player.vx; player.y += player.vy;
+          if (player.y < 0) { player.y = 0; player.vy = 0; }
+          player.onGround = false;
+        } else {
+          let L = keys.left, R = keys.right;
+          if (mode === 'reversed') { const t = L; L = R; R = t; }
+          if (L) { player.vx = -MOVE_SPEED; player.facingRight = false; }
+          else if (R) { player.vx = MOVE_SPEED; player.facingRight = true; }
+          else player.vx *= 0.7;
+          if (mode === 'vvvvvv') {
+            // VVVVVV地帯: ジャンプ＝重力反転
+            if (jumpPressed && player.onGround) { gravityDir *= -1; player.onGround = false; playFlip(); }
+          } else {
+            gravityDir = 1;
+            if (jumpPressed && player.onGround) { player.vy = JUMP_FORCE; player.onGround = false; }
+          }
+          jumpPressed = false;
+          player.vy += GRAVITY * gravityDir;
+          player.vy = Math.max(-14, Math.min(player.vy, 14));
+          player.x += player.vx; player.y += player.vy;
+          resolvePlatforms();
+        }
+
         if (player.y > canvas.height + 60) killPlayer();
+        if (gravityDir === -1 && player.y < -80) killPlayer();   // 天に召される
         if (player.x < camera.x + 5) player.x = camera.x + 5;
         if (player.x + CAT_W > worldWidth) player.x = worldWidth - CAT_W;
         for (const h of hazards) { if (!h.visible) continue; if (rectOverlap(player.x + 2, player.y + 2, CAT_W - 4, CAT_H - 4, h.x, h.y, h.w, h.h)) killPlayer(); }
-        if (currentStage === 1) updateTraps1(); else updateTraps2();
+        TRAP_FNS[currentStage]();
         player.frameTimer++; if (player.frameTimer > 8) { player.frame = (player.frame + 1) % 2; player.frameTimer = 0; }
       } else if (IS_DEAD && !player.alive) {
         player.vy += GRAVITY; player.y += player.vy; jumpPressed = false;
       }
 
-      updateMovingObjects(); updatePitSpikes();
+      updateMovingObjects(); updatePitSpikes(); updateEnemies();
       const targetX = player.x - canvas.width * 0.35;
       camera.x += (targetX - camera.x) * 0.12;
       camera.x = Math.max(0, Math.min(camera.x, worldWidth - canvas.width));
 
-      drawBackground();
-      for (const b of platforms) drawBlock(b);
-      drawHazards(); drawMovingObjects(); drawGoal(); drawCat(player);
+      drawWorld();
     }
 
     drawTitleCat();
     requestAnimationFrame(gameLoop);
+
+    // デバッグ用 (コンソールから _neko.goStage(3) 等)
+    window._neko = {
+      goStage: n => { initAudio(); document.getElementById('titleScreen').style.display = 'none'; document.getElementById('stageClearScreen').style.display = 'none'; document.getElementById('clearScreen').style.display = 'none'; startStage(n); },
+      get player() { return player; },
+      get state() { return { state, currentStage, deathCount, activeMode, gravityDir, battleActive, stage5Final, freezeTimer }; },
+      set px(v) { player.x = v; snapCamera(); },
+      set py(v) { player.y = v; },
+      get battle() { return battle; },
+      set battleT(v) { if (battle) battle.t = v; },
+      get barrier() { return platforms.some(p => p.id === 'battleBarrier'); }
+    };
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

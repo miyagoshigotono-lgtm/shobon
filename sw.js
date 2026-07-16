@@ -1,4 +1,4 @@
-const CACHE_NAME = 'neko-action-v1';
+const CACHE_NAME = 'neko-action-v2';
 const ASSETS = [
   './',
   './index.html',
