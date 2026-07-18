@@ -52,7 +52,8 @@
     }
 
     #deathCount,
-    #stageLabel {
+    #stageLabel,
+    #timeLeft {
       font-family: 'Courier New', monospace;
       font-size: 13px;
       color: #333;
@@ -62,8 +63,14 @@
       border: 1px solid #bbb;
     }
 
+    #timeLeft.warning {
+      color: #c0392b;
+      border-color: #c0392b;
+    }
+
     body.finalZone #deathCount,
-    body.finalZone #stageLabel {
+    body.finalZone #stageLabel,
+    body.finalZone #timeLeft {
       background: rgba(0, 0, 0, 0.85);
       color: #eee;
       border-color: #555;
@@ -144,7 +151,8 @@
     }
 
     #stageClearScreen,
-    #clearScreen {
+    #clearScreen,
+    #timeUpScreen {
       position: fixed;
       inset: 0;
       background: #fff;
@@ -152,7 +160,32 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      z-index: 30;
+      z-index: 40;
+    }
+
+    #timeUpScreen h2 {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(22px, 6vw, 40px);
+      letter-spacing: 4px;
+      color: #111;
+      margin-bottom: 16px;
+    }
+
+    #timeUpScreen p {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(11px, 3vw, 15px);
+      color: #555;
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+
+    #timeUpScreen p.last {
+      margin-bottom: 40px;
+    }
+
+    #timeUpCatWrap {
+      margin-bottom: 24px;
     }
 
     #clearScreen.dark {
@@ -265,14 +298,23 @@
   <div id="hud">
     <div id="stageLabel">STAGE 1</div>
     <div id="deathCount">死亡 : 0</div>
+    <div id="timeLeft">のこり 20:00</div>
   </div>
   <div id="deathMessage">ハッ‥ハッ‥ハ・・・。</div>
 
   <div id="titleScreen">
     <div id="titleCat"><canvas id="titleCatCanvas" width="64" height="64"></canvas></div>
     <h1>ねこのアクション</h1>
-    <p>ゆっくりしていってね！！！</p>
+    <p>ゆっくりしていってね！！！<br>（あそべるのは 20ぷん まで）</p>
     <button class="menuBtn" onclick="startGame()">はじめる</button>
+  </div>
+
+  <div id="timeUpScreen">
+    <div id="timeUpCatWrap"><canvas id="timeUpCatCanvas" width="64" height="64"></canvas></div>
+    <h2>20ぷん たちました</h2>
+    <p>ゲームの やりすぎは よくない。<br>ネコと いっしょに ひとやすみ しよう。</p>
+    <p class="last" id="timeUpMsg">きょうの 死亡回数 : 0</p>
+    <button class="menuBtn" onclick="backToTitle()">きゅうけいする</button>
   </div>
 
   <div id="stageClearScreen">
@@ -306,6 +348,8 @@
     const TILE = 32, GRAVITY = 0.55, JUMP_FORCE = -12.5, MOVE_SPEED = 3.2, CAT_W = 26, CAT_H = 28, GY = 480;
     const STAGE_MAX = 5;
     const FLAP_GRAV = 0.34, FLAP_IMPULSE = -6.2, FLAP_SPEED = 2.6;
+    const PLAY_LIMIT_MS = 20 * 60 * 1000;   // やりすぎ防止: 20分でおしまい
+    let playTimeMs = 0;
     let state = 'title', currentStage = 1, deathCount = 0, camera = { x: 0 }, IS_DEAD = false;
 
     // ステージ3〜5用のグローバル状態
@@ -1382,7 +1426,45 @@
       document.getElementById('titleScreen').style.display = 'none';
       deathCount = 0;
       deathCountEl.textContent = '死亡 : 0';
+      playTimeMs = 0;
+      updateTimeLeft();
       startStage(1);
+    }
+
+    // ============================================================
+    // やりすぎ防止タイマー (20分)
+    // ============================================================
+    const timeLeftEl = document.getElementById('timeLeft');
+    function updateTimeLeft() {
+      const remain = Math.max(0, PLAY_LIMIT_MS - playTimeMs);
+      const totalSec = Math.ceil(remain / 1000);
+      const m = Math.floor(totalSec / 60), s = totalSec % 60;
+      timeLeftEl.textContent = 'のこり ' + m + ':' + String(s).padStart(2, '0');
+      timeLeftEl.classList.toggle('warning', remain <= 3 * 60 * 1000);
+    }
+
+    function triggerTimeUp() {
+      state = 'timeup';
+      cancelPendingDeath();
+      battleActive = false; battle = null;
+      document.getElementById('bgm').pause();
+      playTone(660, 'sine', 0.3, 0.08);
+      setTimeout(() => playTone(440, 'sine', 0.5, 0.08), 300);
+      document.getElementById('timeUpMsg').textContent = 'きょうの 死亡回数 : ' + deathCount;
+      document.getElementById('timeUpScreen').style.display = 'flex';
+      updateTimeLeft();
+    }
+
+    function backToTitle() {
+      document.getElementById('timeUpScreen').style.display = 'none';
+      document.getElementById('stageClearScreen').style.display = 'none';
+      document.getElementById('clearScreen').style.display = 'none';
+      document.body.classList.remove('finalZone');
+      deathMsg.classList.remove('show');
+      playTimeMs = 0;
+      updateTimeLeft();
+      state = 'title';
+      document.getElementById('titleScreen').style.display = 'flex';
     }
 
     // ============================================================
@@ -1755,8 +1837,8 @@
       drawIntro();
     }
 
-    function drawTitleCat() {
-      const tc = document.getElementById('titleCatCanvas'), tctx = tc.getContext('2d');
+    function drawTitleCat(canvasId = 'titleCatCanvas') {
+      const tc = document.getElementById(canvasId), tctx = tc.getContext('2d');
       tctx.clearRect(0, 0, 64, 64);
       const p = tctx, x = 19, y = 8;
       p.fillStyle = '#111'; p.fillRect(x + 3, y + 10, 20, 16); p.fillRect(x + 5, y + 2, 16, 14); p.fillRect(x + 5, y, 5, 5); p.fillRect(x + 16, y, 5, 5);
@@ -1788,6 +1870,11 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (state !== 'playing') return;
+
+      // やりすぎ防止: プレイ中だけ時間を積算し、20分でおしまい
+      playTimeMs += dt;
+      if (frameCount % 15 === 0) updateTimeLeft();
+      if (playTimeMs >= PLAY_LIMIT_MS) { triggerTimeUp(); return; }
 
       // STAGE 5: HUDが信用できない
       if (currentStage === 5 && frameCount % 30 === 0) {
@@ -1869,6 +1956,7 @@
     }
 
     drawTitleCat();
+    drawTitleCat('timeUpCatCanvas');
     requestAnimationFrame(gameLoop);
 
     // デバッグ用 (コンソールから _neko.goStage(3) 等)
@@ -1880,7 +1968,9 @@
       set py(v) { player.y = v; },
       get battle() { return battle; },
       set battleT(v) { if (battle) battle.t = v; },
-      get barrier() { return platforms.some(p => p.id === 'battleBarrier'); }
+      get barrier() { return platforms.some(p => p.id === 'battleBarrier'); },
+      get playTime() { return playTimeMs; },
+      set playTime(v) { playTimeMs = v; }
     };
 
     if ('serviceWorker' in navigator) {
