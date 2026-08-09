@@ -316,13 +316,14 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 210px;
+      height: 420px;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
-      padding: 0 20px 36px;
+      padding: 0 20px 72px;
       z-index: 100;
       pointer-events: none;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.3), transparent);
     }
 
     .ctrl-group {
@@ -332,15 +333,16 @@
     }
 
     .ctrl-btn {
-      width: 96px;
-      height: 96px;
-      background: rgba(0, 0, 0, 0.08);
-      border: 2px solid rgba(0, 0, 0, 0.2);
-      border-radius: 6px;
+      width: 192px;
+      height: 192px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 3px solid rgba(255, 255, 255, 0.4);
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 33px;
+      font-size: 66px;
+      color: #fff;
       cursor: pointer;
       touch-action: none;
       -webkit-tap-highlight-color: transparent;
@@ -355,19 +357,19 @@
 
     .ctrl-btn.pressed,
     .ctrl-btn:active {
-      background: rgba(0, 0, 0, 0.22);
+      background: rgba(255, 255, 255, 0.3);
     }
 
     #leftBtn,
     #rightBtn {
-      width: 120px;
-      height: 120px;
-      font-size: 40px;
+      width: 240px;
+      height: 240px;
+      font-size: 80px;
     }
 
     #jumpBtn {
-      width: 108px;
-      height: 108px;
+      width: 216px;
+      height: 216px;
     }
 
     #dpad {
