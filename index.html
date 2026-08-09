@@ -2080,7 +2080,11 @@
     drawTitleCat('timeUpCatCanvas');
     requestAnimationFrame(gameLoop);
 
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
     function checkOrientation() {
+      if (!isMobile) return;
+
       if (window.innerHeight < window.innerWidth) {
         console.warn('横向き検出: 縦向きでプレイしてください');
         document.body.style.transform = 'rotate(-90deg)';
@@ -2097,8 +2101,10 @@
     }
 
     checkOrientation();
-    window.addEventListener('orientationchange', checkOrientation);
-    window.addEventListener('resize', checkOrientation);
+    if (isMobile) {
+      window.addEventListener('orientationchange', checkOrientation);
+      window.addEventListener('resize', checkOrientation);
+    }
 
     // デバッグ用 (コンソールから _neko.goStage(3) 等)
     window._neko = {
