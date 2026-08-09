@@ -150,6 +150,70 @@
       color: #fff;
     }
 
+    #stageSelectScreen {
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+    }
+
+    #stageSelectScreen h2 {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(18px, 5vw, 32px);
+      letter-spacing: 4px;
+      color: #111;
+      margin-bottom: 40px;
+    }
+
+    #stageGrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+      gap: 20px;
+      margin-bottom: 40px;
+      padding: 0 20px;
+    }
+
+    .stageBtn {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(16px, 4vw, 24px);
+      letter-spacing: 2px;
+      color: #111;
+      background: none;
+      border: 2px solid #111;
+      padding: 20px;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+      min-width: 80px;
+    }
+
+    .stageBtn:active,
+    .stageBtn:hover {
+      background: #111;
+      color: #fff;
+    }
+
+    #backToTitleBtn {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(12px, 3vw, 16px);
+      letter-spacing: 2px;
+      color: #888;
+      background: none;
+      border: 1px solid #ccc;
+      padding: 8px 20px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    #backToTitleBtn:active,
+    #backToTitleBtn:hover {
+      color: #111;
+      border-color: #111;
+    }
+
     #stageClearScreen,
     #clearScreen,
     #timeUpScreen {
@@ -306,7 +370,19 @@
     <div id="titleCat"><canvas id="titleCatCanvas" width="64" height="64"></canvas></div>
     <h1>ねこのアクション</h1>
     <p>ゆっくりしていってね！！！<br>（あそべるのは 20ぷん まで）</p>
-    <button class="menuBtn" onclick="startGame()">はじめる</button>
+    <button class="menuBtn" onclick="showStageSelect()">はじめる</button>
+  </div>
+
+  <div id="stageSelectScreen">
+    <h2>ステージをえらぶ</h2>
+    <div id="stageGrid">
+      <button class="stageBtn" onclick="startStageFromSelect(1)">1</button>
+      <button class="stageBtn" onclick="startStageFromSelect(2)">2</button>
+      <button class="stageBtn" onclick="startStageFromSelect(3)">3</button>
+      <button class="stageBtn" onclick="startStageFromSelect(4)">4</button>
+      <button class="stageBtn" onclick="startStageFromSelect(5)">5</button>
+    </div>
+    <button id="backToTitleBtn" onclick="backToTitleFromSelect()">もどる</button>
   </div>
 
   <div id="timeUpScreen">
@@ -778,7 +854,7 @@
 
       // ②ドッスン地帯
       addThwomp(15 * S - 8, GY - 5 * S, 48, 48);
-      addThwomp(19 * S - 8, GY - 5 * S, 48, 48);
+      addThwomp(20 * S - 8, GY - 5 * S, 48, 48);
       addStaticSpike(17 * S, GY - 20, S, 20);
 
       // 穴: 24
@@ -1421,14 +1497,24 @@
       startStage(1);
     }
 
-    function startGame() {
+    function showStageSelect() {
       initAudio(); restartBgm();
       document.getElementById('titleScreen').style.display = 'none';
+      document.getElementById('stageSelectScreen').style.display = 'flex';
       deathCount = 0;
       deathCountEl.textContent = '死亡 : 0';
       playTimeMs = 0;
       updateTimeLeft();
-      startStage(1);
+    }
+
+    function startStageFromSelect(stageNum) {
+      document.getElementById('stageSelectScreen').style.display = 'none';
+      startStage(stageNum);
+    }
+
+    function backToTitleFromSelect() {
+      document.getElementById('stageSelectScreen').style.display = 'none';
+      document.getElementById('titleScreen').style.display = 'flex';
     }
 
     // ============================================================
