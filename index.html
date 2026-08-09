@@ -68,6 +68,30 @@
       border-color: #c0392b;
     }
 
+    #backStageBtn {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      color: #666;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid #ccc;
+      padding: 6px 12px;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 11;
+      transition: all .15s;
+    }
+
+    #backStageBtn:hover,
+    #backStageBtn:active {
+      color: #c0392b;
+      border-color: #c0392b;
+      background: rgba(255, 255, 255, 0.95);
+    }
+
     body.finalZone #deathCount,
     body.finalZone #stageLabel,
     body.finalZone #timeLeft {
@@ -363,6 +387,7 @@
     <div id="stageLabel">STAGE 1</div>
     <div id="deathCount">死亡 : 0</div>
     <div id="timeLeft">のこり 20:00</div>
+    <button id="backStageBtn" onclick="backToStageSelect()">ステージせんたく</button>
   </div>
   <div id="deathMessage">ハッ‥ハッ‥ハ・・・。</div>
 
@@ -1515,6 +1540,16 @@
     function backToTitleFromSelect() {
       document.getElementById('stageSelectScreen').style.display = 'none';
       document.getElementById('titleScreen').style.display = 'flex';
+    }
+
+    function backToStageSelect() {
+      cancelPendingDeath();
+      state = 'title';
+      document.getElementById('stageClearScreen').style.display = 'none';
+      document.getElementById('clearScreen').style.display = 'none';
+      document.body.classList.remove('finalZone');
+      deathMsg.classList.remove('show');
+      document.getElementById('stageSelectScreen').style.display = 'flex';
     }
 
     // ============================================================
