@@ -2080,6 +2080,26 @@
     drawTitleCat('timeUpCatCanvas');
     requestAnimationFrame(gameLoop);
 
+    function checkOrientation() {
+      if (window.innerHeight < window.innerWidth) {
+        console.warn('横向き検出: 縦向きでプレイしてください');
+        document.body.style.transform = 'rotate(-90deg)';
+        document.body.style.transformOrigin = '0 0';
+        document.body.style.width = window.innerHeight + 'px';
+        document.body.style.height = window.innerWidth + 'px';
+        document.body.style.overflow = 'hidden';
+      } else {
+        document.body.style.transform = 'none';
+        document.body.style.width = '100%';
+        document.body.style.height = '100%';
+        document.body.style.overflow = 'auto';
+      }
+    }
+
+    checkOrientation();
+    window.addEventListener('orientationchange', checkOrientation);
+    window.addEventListener('resize', checkOrientation);
+
     // デバッグ用 (コンソールから _neko.goStage(3) 等)
     window._neko = {
       goStage: n => { initAudio(); document.getElementById('titleScreen').style.display = 'none'; document.getElementById('stageClearScreen').style.display = 'none'; document.getElementById('clearScreen').style.display = 'none'; startStage(n); },
