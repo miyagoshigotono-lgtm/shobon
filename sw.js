@@ -1,4 +1,4 @@
-const CACHE_NAME = 'neko-action-static';
+const CACHE_NAME = 'neko-action-static-20250810';
 const ASSETS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
