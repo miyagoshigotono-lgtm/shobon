@@ -311,6 +311,57 @@
       margin-bottom: 40px;
     }
 
+    #updateNotification {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 30px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    #updateNotification.show {
+      display: block;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.9);
+      }
+      to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+      }
+    }
+
+    #updateContent p {
+      color: #fff;
+      font-size: 18px;
+      margin-bottom: 20px;
+      font-family: 'Courier New', monospace;
+    }
+
+    #updateContent button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+    }
+
+    #updateContent button:active {
+      background: #45a049;
+    }
+
     #controller {
       position: fixed;
       bottom: 0;
@@ -441,6 +492,13 @@
     <h2 id="clearTitle">全ステージクリア！</h2>
     <p id="clearMsg">総死亡回数 : 0</p>
     <button class="menuBtn" id="clearBtn" onclick="restartGame()">もういちど</button>
+  </div>
+
+  <div id="updateNotification">
+    <div id="updateContent">
+      <p>アップデートがあります</p>
+      <button onclick="reloadForUpdate()">アップデート</button>
+    </div>
   </div>
 
   <div id="controller">
@@ -2139,9 +2197,48 @@
       set playTime(v) { playTimeMs = v; }
     };
 
+    let swRegistration = null;
+
+    function reloadForUpdate() {
+      if (swRegistration?.waiting) {
+        swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        setTimeout(() => location.reload(), 500);
+      } else {
+        location.reload();
+      }
+    }
+
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').then(() => console.log('SW登録完了')).catch(e => console.log('SW登録失敗:', e));
+        navigator.serviceWorker.register('./sw.js').then(reg => {
+          swRegistration = reg;
+          console.log('SW登録完了');
+
+          // 新しいService Workerが待機中の場合
+          if (reg.waiting) {
+            document.getElementById('updateNotification').classList.add('show');
+          }
+
+          // Service Worker更新をチェック
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                document.getElementById('updateNotification').classList.add('show');
+              }
+            });
+          });
+
+          // 定期的にアップデートをチェック
+          setInterval(() => {
+            reg.update().catch(() => {});
+          }, 60000); // 60秒ごと
+        }).catch(e => console.log('SW登録失敗:', e));
+      });
+
+      // Service Worker activateメッセージリスナー
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        document.getElementById('updateNotification').classList.remove('show');
       });
     }
   </script>
