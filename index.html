@@ -1179,9 +1179,9 @@
         if (b.t >= b.nextBone) {
           let interval, h, spd;
           if (b.t < 560) { interval = 65; h = 38; spd = 3.2; }
-          else if (b.t < 1000) { interval = 52; h = (Math.floor(b.t / 52) % 2 === 0) ? 30 : 55; spd = 3.8; }
+          else if (b.t < 1000) { interval = 60; h = 38; spd = 3.8; }
           else { interval = 75; h = 40; spd = 4.6; }
-          const fromLeft = b.t >= 560 && (Math.floor(b.t / interval) % 2 === 0);
+          const fromLeft = b.t >= 560 && (Math.floor(b.t / 120) % 2 === 0);
           b.bones.push({
             x: fromLeft ? BX + 2 : BX + BW - 14,
             y: BY + BH - 4 - h, w: 12, h,
