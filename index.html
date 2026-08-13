@@ -952,7 +952,8 @@
     function buildStage4() {
       platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
       enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
-      trap4 = { battleDone: false, canonTimer: 0, canonIndex: 0 };
+      const wasBattleDone = trap4?.battleDone ? true : false;
+      trap4 = { battleDone: wasBattleDone, canonTimer: 0, canonIndex: 0 };
       const S = TILE;
 
       // ①？ブロック地帯 (たたくと、ろくなことがない)
@@ -973,7 +974,12 @@
 
       // ③戦闘のとびら (28*S) と バリア (戦闘に勝つまで通れない)
       decorations.push({ type: 'door', x: 28 * S, y: GY - 3 * S });
-      platforms.push({ x: 30 * S, y: GY - 6 * S, w: S, h: 6 * S, type: 'solid', visible: true, id: 'battleBarrier' });
+      if (!trap4.battleDone) {
+        platforms.push({ x: 30 * S, y: GY - 6 * S, w: S, h: 6 * S, type: 'solid', visible: true, id: 'battleBarrier' });
+      } else {
+        // ボス戦クリア済みの場合、バリアがあれば削除
+        platforms = platforms.filter(p => p.id !== 'battleBarrier');
+      }
 
       // ④揺れる島の谷 (穴: 33〜39)
       addOscIsland(34 * S, GY - 2 * S, 2 * S, S, 'osc4A', 'y', 1.5 * S, 0.08);
