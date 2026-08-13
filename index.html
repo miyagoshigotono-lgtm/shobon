@@ -46,7 +46,10 @@
       right: 0;
       display: flex;
       justify-content: center;
-      gap: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 10px;
       pointer-events: none;
       z-index: 10;
     }
@@ -55,12 +58,13 @@
     #stageLabel,
     #timeLeft {
       font-family: 'Courier New', monospace;
-      font-size: 13px;
+      font-size: clamp(10px, 2.6vw, 13px);
       color: #333;
-      letter-spacing: 2px;
+      letter-spacing: 1px;
       background: rgba(255, 255, 255, 0.9);
-      padding: 4px 14px;
+      padding: 4px clamp(6px, 2vw, 14px);
       border: 1px solid #bbb;
+      white-space: nowrap;
     }
 
     #timeLeft.warning {
@@ -69,19 +73,16 @@
     }
 
     #backStageBtn {
-      position: fixed;
-      top: 12px;
-      right: 12px;
       font-family: 'Courier New', monospace;
-      font-size: 11px;
+      font-size: clamp(9px, 2.4vw, 11px);
       letter-spacing: 1px;
       color: #666;
       background: rgba(255, 255, 255, 0.85);
       border: 1px solid #ccc;
-      padding: 6px 12px;
+      padding: 5px clamp(6px, 2vw, 12px);
       cursor: pointer;
       pointer-events: auto;
-      z-index: 11;
+      white-space: nowrap;
       transition: all .15s;
     }
 
@@ -363,6 +364,7 @@
     }
 
     #controller {
+      --btn-size: clamp(96px, 13vh, 140px);
       position: fixed;
       bottom: 0;
       left: 0;
@@ -384,7 +386,7 @@
     }
 
     .ctrl-btn {
-      height: clamp(96px, 13vh, 140px);
+      height: var(--btn-size);
       background: rgba(255, 255, 255, 0.15);
       border: 3px solid rgba(255, 255, 255, 0.4);
       border-radius: 8px;
@@ -417,28 +419,27 @@
     }
 
     #jumpBtn {
-      width: clamp(84px, 20vw, 160px);
+      width: var(--btn-size);
       flex: 0 0 auto;
     }
 
-    /* 左右キー: 残り幅をすべて使って横に大きく */
+    /* 左右キー: 高さと同じ幅の正方形、画面左寄せ */
     #dpad {
       gap: 0;
-      flex: 1 1 auto;
-      min-width: 0;
+      flex: 0 0 auto;
     }
     #dpad #leftBtn {
       border-right: none;
       border-top-right-radius: 0;
       border-bottom-right-radius: 0;
-      flex: 1 1 0;
-      min-width: 0;
+      width: var(--btn-size);
+      flex: 0 0 auto;
     }
     #dpad #rightBtn {
       border-top-left-radius: 0;
       border-bottom-left-radius: 0;
-      flex: 1 1 0;
-      min-width: 0;
+      width: var(--btn-size);
+      flex: 0 0 auto;
     }
   </style>
 </head>
