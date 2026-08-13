@@ -367,12 +367,12 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 60vh;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
-      padding: 20px;
-      z-index: 100;
+      gap: 8px;
+      padding: 0 8px 16px;
+      z-index: 10;
       pointer-events: none;
       background: linear-gradient(to top, rgba(0, 0, 0, 0.3), transparent);
     }
@@ -381,13 +381,10 @@
       display: flex;
       gap: 12px;
       pointer-events: all;
-      height: 100%;
-      flex: 1;
     }
 
     .ctrl-btn {
-      width: 100%;
-      height: 100%;
+      height: clamp(96px, 13vh, 140px);
       background: rgba(255, 255, 255, 0.15);
       border: 3px solid rgba(255, 255, 255, 0.4);
       border-radius: 8px;
@@ -416,45 +413,32 @@
 
     #leftBtn,
     #rightBtn {
-      width: 100%;
-      height: 100%;
       font-size: 80px;
-      flex-shrink: 0;
-    }
-
-    .ctrl-group #leftBtn,
-    .ctrl-group #rightBtn {
-      flex: 1;
     }
 
     #jumpBtn {
-      width: 25%;
-      height: 100%;
-      min-width: 120px;
-      flex-shrink: 0;
+      width: clamp(84px, 20vw, 160px);
+      flex: 0 0 auto;
     }
 
+    /* 左右キー: 残り幅をすべて使って横に大きく */
     #dpad {
       gap: 0;
-      flex: 1;
-      display: flex;
-      max-width: 50%;
-      height: 100%;
+      flex: 1 1 auto;
+      min-width: 0;
     }
     #dpad #leftBtn {
       border-right: none;
       border-top-right-radius: 0;
       border-bottom-right-radius: 0;
-      flex: 1;
-      width: auto;
-      height: 100%;
+      flex: 1 1 0;
+      min-width: 0;
     }
     #dpad #rightBtn {
       border-top-left-radius: 0;
       border-bottom-left-radius: 0;
-      flex: 1;
-      width: auto;
-      height: 100%;
+      flex: 1 1 0;
+      min-width: 0;
     }
   </style>
 </head>
