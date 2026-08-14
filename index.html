@@ -606,22 +606,29 @@
 
     // 入力
     const keys = { left: false, right: false };
-    let jumpPressed = false, jumpUsed = false;
+    let jumpPressed = false, jumpUsed = false, duckUsed = false, duckHeld = false;
 
     // ▲を押した瞬間。リズムモード中は「押した時刻」を音の時計で記録する
     function onJumpDown() {
-      if (rhythmActive) { rhythmPresses.push(actx ? actx.currentTime : 0); return; }
+      if (rhythmActive) { rhythmPresses.push({ t: actx ? actx.currentTime : 0, act: 'jump' }); return; }
       jumpPressed = true; playJump();
     }
+    // ◀▶ を押した瞬間 = しゃがむ (リズムモード中だけ意味を持つ)
+    function onDuckDown() {
+      if (!rhythmActive) return;
+      rhythmPresses.push({ t: actx ? actx.currentTime : 0, act: 'duck' });
+    }
     document.addEventListener('keydown', e => {
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' '].includes(e.key)) e.preventDefault();
-      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
-      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+      if (e.key === 'ArrowLeft' || e.key === 'a') { if (!keys.left) onDuckDown(); keys.left = true; }
+      if (e.key === 'ArrowRight' || e.key === 'd') { if (!keys.right) onDuckDown(); keys.right = true; }
+      if ((e.key === 'ArrowDown' || e.key === 's') && !duckUsed) { duckUsed = true; onDuckDown(); }
       if ((e.key === 'ArrowUp' || e.key === ' ' || e.key === 'z') && !jumpUsed) { jumpUsed = true; onJumpDown(); }
     });
     document.addEventListener('keyup', e => {
       if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
       if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+      if (e.key === 'ArrowDown' || e.key === 's') duckUsed = false;
       if (e.key === 'ArrowUp' || e.key === ' ' || e.key === 'z') jumpUsed = false;
     });
     const dpadEl = document.getElementById('dpad');
@@ -640,6 +647,10 @@
       keys.left = l; keys.right = r;
       lBtn.classList.toggle('pressed', l);
       rBtn.classList.toggle('pressed', r);
+      // 押した瞬間だけを拾う (リズム中の「しゃがむ」入力)
+      const anyDown = l || r;
+      if (anyDown && !duckHeld) onDuckDown();
+      duckHeld = anyDown;
     }
 
     dpadEl.addEventListener('touchstart', handleDPadTouch, { passive: false });
@@ -1070,30 +1081,38 @@
       platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
       enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
       const wasDone = trap6 && trap6.done ? true : false;
-      trap6 = { done: wasDone };
+      const wasDone2 = trap6 && trap6.done2 ? true : false;
+      trap6 = { done: wasDone, done2: wasDone2 };
       const S = TILE;
 
       // ①ステージそで (助走だけ。ここに理不尽は ない)
-      for (let i = 0; i <= 30; i++)addSolid(i * S, GY);
+      for (let i = 0; i <= 46; i++)addSolid(i * S, GY);
       addSign(3 * S, GY, 'アンコール！');
       addSign(9 * S, GY, '▲で リズムを まねろ');
 
-      // ②ステージ中央: 越えられない壁。リズムに勝つまで先へ進めない
+      // ②一曲目: まねっこ。勝つまで越えられない壁
       if (!trap6.done) {
         platforms.push({ x: 16 * S, y: GY - 6 * S, w: S, h: 6 * S, type: 'solid', visible: true, id: 'rhythmBarrier' });
-      } else {
-        platforms = platforms.filter(p => p.id !== 'rhythmBarrier');
       }
 
-      // ③フィナーレ
-      addSign(22 * S, GY, 'ありがとう');
-      goalObj = { x: 28 * S, y: GY - 4 * S, w: S, h: 4 * S, poleKillH: 3 * S, flagY: GY - 4 * S, flagH: S };
-      worldWidth = 32 * S;
+      // ③二曲目: たまよけ
+      addSign(23 * S, GY, 'つぎは たまよけ');
+      if (!trap6.done2) {
+        platforms.push({ x: 30 * S, y: GY - 6 * S, w: S, h: 6 * S, type: 'solid', visible: true, id: 'rhythmBarrier2' });
+      }
+
+      // ④フィナーレ
+      addSign(38 * S, GY, 'ありがとう');
+      goalObj = { x: 44 * S, y: GY - 4 * S, w: S, h: 4 * S, poleKillH: 3 * S, flagY: GY - 4 * S, flagH: S };
+      worldWidth = 48 * S;
     }
 
     function updateTraps6() {
       const S = TILE;
-      if (!trap6.done && !rhythmActive && player.x > 13.5 * S && player.onGround) startRhythm();
+      if (!rhythmActive && player.onGround) {
+        if (!trap6.done && player.x > 13.5 * S) startRhythm('copy');
+        else if (trap6.done && !trap6.done2 && player.x > 27.5 * S) startRhythm('dodge');
+      }
       checkGoal();
     }
 
@@ -1107,7 +1126,7 @@
     const RH_PPS = 220;               // ノーツが流れる速さ (px/秒)
     const RH_MAX_MISS = 6;
 
-    // お手本(call)を聴いて、同じリズムを まねる(resp)
+    // 前半: お手本(call)を聴いて、同じリズムを まねる(resp)。動作は▲だけ
     const RH_PHRASES = [
       { call: [4, 5, 6], resp: [8, 9, 10] },
       { call: [12, 13, 14.5], resp: [16, 17, 18.5] },
@@ -1116,38 +1135,72 @@
     ];
     const RH_END_BEAT = 38;
 
-    function startRhythm() {
+    // 後半「よけろ」: 玉が とんでくる。低い玉は▲でとび、高い玉は◀▶でしゃがむ
+    // j=ジャンプ / d=しゃがむ
+    const RH2_PHRASES = [
+      { call: [[4, 'j'], [6, 'j']], resp: [[8, 'j'], [10, 'j']] },
+      { call: [[12, 'd'], [14, 'd']], resp: [[16, 'd'], [18, 'd']] },
+      { call: [[20, 'j'], [22, 'd'], [23, 'j']], resp: [[24, 'j'], [26, 'd'], [27, 'j']] },
+      { call: [[28, 'd'], [29, 'j'], [30.5, 'd'], [31, 'j']], resp: [[32, 'd'], [33, 'j'], [34.5, 'd'], [35, 'j']] },
+    ];
+    const RH2_END_BEAT = 38;
+    const RH2_FLIGHT = 2 * RH_BEAT;   // 玉が飛んでくるのにかかる時間 (2拍)
+
+    // mode: 'copy' = まねる / 'dodge' = よける
+    function startRhythm(mode) {
       initAudio();
       if (!actx) return;                       // 音が出せない環境では発動しない
       if (actx.state === 'suspended') actx.resume().catch(() => { });
       const bgm = document.getElementById('bgm');
       bgm.pause();                             // リズム中はBGMを止める
 
+      const dodge = mode === 'dodge';
+      const phrases = dodge ? RH2_PHRASES : RH_PHRASES;
+      const endBeat = dodge ? RH2_END_BEAT : RH_END_BEAT;
+
       const cues = [];
-      for (const ph of RH_PHRASES) {
-        for (const b of ph.call) cues.push({ beat: b, t: b * RH_BEAT, kind: 'call', judged: false, result: '' });
-        for (const b of ph.resp) cues.push({ beat: b, t: b * RH_BEAT, kind: 'resp', judged: false, result: '' });
+      for (const ph of phrases) {
+        for (const c of ph.call) {
+          const b = dodge ? c[0] : c;
+          cues.push({ beat: b, t: b * RH_BEAT, kind: 'call', act: dodge ? (c[1] === 'd' ? 'duck' : 'jump') : 'jump', judged: false, result: '' });
+        }
+        for (const c of ph.resp) {
+          const b = dodge ? c[0] : c;
+          cues.push({ beat: b, t: b * RH_BEAT, kind: 'resp', act: dodge ? (c[1] === 'd' ? 'duck' : 'jump') : 'jump', judged: false, result: '' });
+        }
       }
       cues.sort((a, b) => a.t - b.t);
 
-      // 予約する音のリスト (メトロノーム + お手本)
+      // 予約する音のリスト (メトロノーム + 玉/お手本の音)
       const ev = [];
-      for (let b = 0; b <= RH_END_BEAT; b++) {
+      for (let b = 0; b <= endBeat; b++) {
         ev.push({ t: b * RH_BEAT, freq: b % 4 === 0 ? 440 : 330, type: 'square', dur: 0.05, vol: b % 4 === 0 ? 0.05 : 0.03 });
       }
       for (const c of cues) {
-        if (c.kind === 'call') ev.push({ t: c.t, freq: 880, type: 'triangle', dur: 0.16, vol: 0.12 });
+        if (dodge) {
+          // 玉が発射される瞬間に種類の音が鳴る。2拍あとに到達する
+          //   低い音 (ひくい玉) → ▲でとぶ / 高い音 (たかい玉) → ◀▶でしゃがむ
+          const f = c.act === 'jump' ? 300 : 1100;
+          const ty = c.act === 'jump' ? 'sawtooth' : 'sine';
+          ev.push({ t: c.t - RH2_FLIGHT, freq: f, type: ty, dur: 0.18, vol: 0.11 });
+          if (c.kind === 'call') ev.push({ t: c.t, freq: c.act === 'jump' ? 620 : 880, type: 'triangle', dur: 0.12, vol: 0.09 });
+        } else if (c.kind === 'call') {
+          ev.push({ t: c.t, freq: 880, type: 'triangle', dur: 0.16, vol: 0.12 });
+        }
       }
       ev.sort((a, b) => a.t - b.t);
 
       rhythmPresses = [];
       rhythmActive = true;
       rhythm = {
+        mode: dodge ? 'dodge' : 'copy',
+        endBeat,
         startTime: actx.currentTime + 1.2,     // カウントインまでの間
         lat: actx.outputLatency || actx.baseLatency || 0,
         cues, ev, evIdx: 0,
         just: 0, ok: 0, miss: 0, combo: 0, maxCombo: 0,
         flash: '', flashT: 0, catBounce: 0, gameBounce: 0,
+        catAct: '', catActT: 0, gameAct: '', gameActT: 0,
         over: false, overT: 0,
         wallStart: performance.now()           // 音の時計が止まったままかを見る用
       };
@@ -1158,7 +1211,7 @@
       return actx.currentTime - rhythm.lat - rhythm.startTime;
     }
 
-    function rhythmJudge(pressAt) {
+    function rhythmJudge(pressAt, act) {
       const r = rhythm;
       const t = pressAt - r.lat - r.startTime;
       let best = null, bestD = Infinity;
@@ -1167,11 +1220,19 @@
         const d = Math.abs(t - c.t);
         if (d < bestD) { bestD = d; best = c; }
       }
-      r.catBounce = 1;
+      r.catBounce = 1; r.catAct = act; r.catActT = 1;
       if (!best || bestD > RH_OK) {          // 空打ち
         r.miss++; r.combo = 0;
         r.flash = 'ミス'; r.flashT = 1;
         playTone(200, 'sawtooth', 0.12, 0.08);
+        return;
+      }
+      // よけるゲームでは「よけかた」が違うと当たる
+      if (best.act !== act) {
+        best.judged = true; best.result = 'miss';
+        r.miss++; r.combo = 0;
+        r.flash = act === 'jump' ? 'しゃがめ！' : 'とべ！'; r.flashT = 1;
+        playTone(160, 'sawtooth', 0.18, 0.09);
         return;
       }
       best.judged = true;
@@ -1195,9 +1256,10 @@
       if (actx.state !== 'running') {
         if (actx.state === 'suspended') actx.resume().catch(() => { });
         if (performance.now() - r.wallStart > 6000) {
+          const dodge = r.mode === 'dodge';
           rhythmActive = false; rhythm = null; rhythmPresses = [];
-          trap6.done = true;
-          platforms = platforms.filter(p => p.id !== 'rhythmBarrier');
+          if (dodge) { trap6.done2 = true; platforms = platforms.filter(p => p.id !== 'rhythmBarrier2'); }
+          else { trap6.done = true; platforms = platforms.filter(p => p.id !== 'rhythmBarrier'); }
           restartBgm();
         }
         return;
@@ -1218,7 +1280,7 @@
       // 押した瞬間を判定 (フレームではなく音の時計で)
       while (rhythmPresses.length) {
         const p = rhythmPresses.shift();
-        if (!r.over && now > -0.5) rhythmJudge(p);
+        if (!r.over && now > -0.5) rhythmJudge(p.t, p.act);
       }
 
       // 押されなかったノーツを見逃しにする
@@ -1228,28 +1290,39 @@
           r.miss++; r.combo = 0;
           r.flash = 'ミス'; r.flashT = 1;
         }
-        if (c.kind === 'call' && !c.judged && now >= c.t) { c.judged = true; r.gameBounce = 1; }
+        if (c.kind === 'call' && !c.judged && now >= c.t) {
+          c.judged = true; r.gameBounce = 1;
+          r.gameAct = c.act; r.gameActT = 1;    // お手本が よけて みせる
+        }
       }
 
       if (r.flashT > 0) r.flashT -= 0.04;
       if (r.catBounce > 0) r.catBounce -= 0.08;
       if (r.gameBounce > 0) r.gameBounce -= 0.08;
+      if (r.catActT > 0) r.catActT -= 0.07;
+      if (r.gameActT > 0) r.gameActT -= 0.07;
 
       // 失敗
       if (!r.over && r.miss >= RH_MAX_MISS) { rhythmFail(); return; }
 
       // 完走
-      if (!r.over && now > RH_END_BEAT * RH_BEAT) {
+      if (!r.over && now > r.endBeat * RH_BEAT) {
         r.over = true; r.overT = 0;
         playCoin();
       }
       if (r.over) {
         r.overT++;
         if (r.overT > 150) {
-          lastRhythmStats = { just: r.just, ok: r.ok, miss: r.miss, maxCombo: r.maxCombo, cleared: true };
+          lastRhythmStats = { mode: r.mode, just: r.just, ok: r.ok, miss: r.miss, maxCombo: r.maxCombo, cleared: true };
+          const done2 = r.mode === 'dodge';
           rhythmActive = false; rhythm = null;
-          trap6.done = true;
-          platforms = platforms.filter(p => p.id !== 'rhythmBarrier');
+          if (done2) {
+            trap6.done2 = true;
+            platforms = platforms.filter(p => p.id !== 'rhythmBarrier2');
+          } else {
+            trap6.done = true;
+            platforms = platforms.filter(p => p.id !== 'rhythmBarrier');
+          }
           restartBgm();
         }
       }
@@ -1264,8 +1337,17 @@
     }
 
     // ---- リズム画面の描画 ---------------------------------------
-    function drawRhythmCat(cx, cy, s, bounce) {
-      const y = cy - bounce * 10;
+    // act: '' / 'jump' (とぶ) / 'duck' (しゃがむ)、amt: 動作の強さ 0〜1
+    function drawRhythmCat(cx, cy, s, bounce, act, amt) {
+      const lift = act === 'jump' ? 34 * s * Math.max(0, amt) : 0;
+      const squash = act === 'duck' ? Math.max(0, amt) : 0;
+      const k = 1 - squash * 0.55;                  // しゃがむと縦につぶれる
+      const y = cy - bounce * 10 - lift;
+      const footY = y + 14 * s;            // 足元。ここを軸に縮めて 地面から浮かせない
+      ctx.save();
+      ctx.translate(cx, footY);
+      ctx.scale(1, k);
+      ctx.translate(-cx, -footY);
       ctx.fillStyle = '#111';
       ctx.fillRect(cx - 10 * s, y - 2 * s, 20 * s, 16 * s);        // からだ
       ctx.fillRect(cx - 8 * s, y - 16 * s, 16 * s, 15 * s);        // あたま
@@ -1277,6 +1359,69 @@
       ctx.fillStyle = '#111';
       ctx.fillRect(cx - 4 * s, y - 10 * s, 2 * s, 3 * s);
       ctx.fillRect(cx + 2 * s, y - 10 * s, 2 * s, 3 * s);
+      ctx.restore();
+    }
+
+    // 「よけろ」の画面
+    function drawRhythmDodge(now, W, H, s) {
+      const r = rhythm;
+      const ds = s * 1.7;                          // このゲームだけ大きめに描く
+      const hitX = Math.max(96, W * 0.27);         // 玉が とどく位置
+      const groundY = H * 0.62;
+      const lowY = groundY - 15 * ds;              // ひくい玉 (とんでよける)
+      const highY = groundY - 40 * ds;             // たかい玉 (しゃがんでよける)
+
+      // あそびかた (プレイ領域と重ならない高さに置く)
+      ctx.textAlign = 'left';
+      ctx.font = 'bold ' + Math.round(13 * s) + 'px "Courier New", monospace';
+      ctx.fillStyle = '#888';
+      ctx.fillText('たかい玉 → 左右ボタンで しゃがむ', 14, H * 0.36);
+      ctx.fillText('ひくい玉 → ▲ でとぶ', 14, H * 0.36 + 20 * s);
+
+      // 地面
+      ctx.strokeStyle = '#ccc'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
+      // 到達ライン
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(hitX, highY - 20 * ds); ctx.lineTo(hitX, groundY); ctx.stroke();
+
+      // 玉 (2拍かけて右から飛んでくる)
+      for (const c of r.cues) {
+        const dt = c.t - now;
+        if (dt > RH2_FLIGHT || dt < -0.45) continue;
+        const prog = 1 - dt / RH2_FLIGHT;                 // 0 → 1
+        const x = W + 34 - prog * (W + 34 - hitX);
+        const y = c.act === 'jump' ? lowY : highY;
+        const rad = 14 * ds;
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
+        if (c.kind === 'call') { ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 3; ctx.stroke(); }
+        else { ctx.fillStyle = c.judged && c.result !== 'miss' ? '#ccc' : '#111'; ctx.fill(); }
+        // ひくい玉は下に線、たかい玉は上に線。音が聞こえなくても見分けられる
+        ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+        ctx.beginPath();
+        if (c.act === 'jump') { ctx.moveTo(x - rad, y + rad + 6); ctx.lineTo(x + rad, y + rad + 6); }
+        else { ctx.moveTo(x - rad, y - rad - 6); ctx.lineTo(x + rad, y - rad - 6); }
+        ctx.stroke();
+      }
+
+      // お手本 (うしろ) と きみ (まえ)。どちらも地面に立たせる
+      const gs = s * 0.95, gx = hitX - 74 * s;
+      drawRhythmGameChar(gx, groundY - 3 * gs, gs, r.gameBounce);
+      if (r.gameActT > 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = 'bold ' + Math.round(13 * s) + 'px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(r.gameAct === 'jump' ? 'とぶ！' : 'しゃがむ！', gx, groundY - 30 * gs);
+      }
+      drawRhythmCat(hitX, groundY - 14 * ds, ds, r.catBounce, r.catAct, r.catActT);
+
+      // 名前は地面の下に置いて キャラと重ならないようにする
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#aaa';
+      ctx.font = 'bold ' + Math.round(12 * s) + 'px "Courier New", monospace';
+      ctx.fillText('おてほん', gx, groundY + 24 * s);
+      ctx.fillText('きみ', hitX, groundY + 24 * s);
+      ctx.textAlign = 'left';
     }
 
     function drawRhythmGameChar(cx, cy, s, bounce) {
@@ -1306,6 +1451,8 @@
       const callY = H * 0.42, respY = H * 0.62;
       const s = Math.min(1.6, W / 420);
 
+      if (r.mode === 'dodge') { drawRhythmDodge(now, W, H, s); drawRhythmHud(r, now, W, H, s, targetX, respY); return; }
+
       // 2本のレーン
       ctx.strokeStyle = '#ddd'; ctx.lineWidth = 2;
       for (const ly of [callY, respY]) {
@@ -1334,7 +1481,7 @@
 
       // キャラクター
       drawRhythmGameChar(targetX - 46, callY + 18, s * 0.9, r.gameBounce);
-      drawRhythmCat(targetX - 46, respY + 26, s * 0.9, r.catBounce);
+      drawRhythmCat(targetX - 46, respY + 26, s * 0.9, r.catBounce, '', 0);
 
       ctx.textAlign = 'left';
       ctx.fillStyle = '#888';
@@ -1342,13 +1489,20 @@
       ctx.fillText('おてほん', 14, callY - 46);
       ctx.fillText('きみ', 14, respY - 46);
 
+      drawRhythmHud(r, now, W, H, s, targetX, respY);
+    }
+
+    // 見出し・判定・スコア (2曲で共通)
+    function drawRhythmHud(r, now, W, H, s, targetX, flashY) {
+      const dodge = r.mode === 'dodge';
+
       // 判定表示
       if (r.flashT > 0) {
         ctx.globalAlpha = Math.max(0, Math.min(1, r.flashT));
         ctx.fillStyle = r.flash === 'ジャスト！' ? '#111' : (r.flash === 'おしい' ? '#777' : '#c0392b');
         ctx.font = 'bold ' + Math.round(26 * s) + 'px "Courier New", monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(r.flash, targetX, respY + 78);
+        ctx.fillText(r.flash, targetX, flashY + 78);
         ctx.globalAlpha = 1;
       }
 
@@ -1357,15 +1511,15 @@
       ctx.fillStyle = '#111';
       if (r.over) {
         ctx.font = 'bold ' + Math.round(24 * s) + 'px "Courier New", monospace';
-        ctx.fillText('アンコール、せいこう！', W / 2, H * 0.2);
+        ctx.fillText(dodge ? 'アンコール、かんそう！' : 'いっきょくめ、せいこう！', W / 2, H * 0.2);
         ctx.font = 'bold ' + Math.round(15 * s) + 'px "Courier New", monospace';
         ctx.fillText('さいだいコンボ ' + r.maxCombo, W / 2, H * 0.2 + 28 * s);
       } else if (now < 4 * RH_BEAT) {
-        ctx.font = 'bold ' + Math.round(20 * s) + 'px "Courier New", monospace';
-        ctx.fillText('おてほんの リズムを まねろ', W / 2, H * 0.2);
-        ctx.font = Math.round(14 * s) + 'px "Courier New", monospace';
+        ctx.font = 'bold ' + Math.round(19 * s) + 'px "Courier New", monospace';
+        ctx.fillText(dodge ? '玉を よけろ' : 'おてほんの リズムを まねろ', W / 2, H * 0.2);
+        ctx.font = Math.round(13 * s) + 'px "Courier New", monospace';
         ctx.fillStyle = '#666';
-        ctx.fillText('▲を たてラインで おす', W / 2, H * 0.2 + 26 * s);
+        ctx.fillText(dodge ? 'おてほんを みて まねろ' : '▲を たてラインで おす', W / 2, H * 0.2 + 26 * s);
       }
 
       // スコア
@@ -2581,9 +2735,12 @@
       get actx() { return actx; },
       get lastRhythmStats() { return lastRhythmStats; },
       get trap6done() { return !!trap6.done; },
+      get trap6done2() { return !!trap6.done2; },
       get rhythmBarrier() { return platforms.some(p => p.id === 'rhythmBarrier'); },
-      pressRhythm: t => { rhythmPresses.push(t); },
+      get rhythmBarrier2() { return platforms.some(p => p.id === 'rhythmBarrier2'); },
+      pressRhythm: (t, act) => { rhythmPresses.push({ t, act: act || 'jump' }); },
       forceFinal: () => { stage5Final = true; applyFinalPhase(); },
+      skipSong1: () => { trap6.done = true; platforms = platforms.filter(p => p.id !== 'rhythmBarrier'); },
       set px(v) { player.x = v; snapCamera(); },
       set py(v) { player.y = v; },
       get battle() { return battle; },
