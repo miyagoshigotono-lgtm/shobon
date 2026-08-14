@@ -196,10 +196,11 @@
 
     #stageGrid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(3, minmax(70px, 1fr));
+      gap: 18px;
       margin-bottom: 40px;
       padding: 0 20px;
+      max-width: 360px;
     }
 
     .stageBtn {
@@ -470,6 +471,7 @@
       <button class="stageBtn" onclick="startStageFromSelect(3)">3</button>
       <button class="stageBtn" onclick="startStageFromSelect(4)">4</button>
       <button class="stageBtn" onclick="startStageFromSelect(5)">5</button>
+      <button class="stageBtn" onclick="startStageFromSelect(6)">6</button>
     </div>
     <button id="backToTitleBtn" onclick="backToTitleFromSelect()">もどる</button>
   </div>
@@ -518,7 +520,7 @@
     resize(); window.addEventListener('resize', resize);
 
     const TILE = 32, GRAVITY = 0.55, JUMP_FORCE = -12.5, MOVE_SPEED = 3.2, CAT_W = 26, CAT_H = 28, GY = 480;
-    const STAGE_MAX = 5;
+    const STAGE_MAX = 6;
     const FLAP_GRAV = 0.34, FLAP_IMPULSE = -6.2, FLAP_SPEED = 2.6;
     const PLAY_LIMIT_MS = 20 * 60 * 1000;   // やりすぎ防止: 20分でおしまい
     let playTimeMs = 0;
@@ -530,6 +532,9 @@
     let zones = [];                     // {x1,x2,type}
     let enemies = [], decorations = [];
     let battleActive = false, battle = null;   // Undertale風バトル
+    let rhythmActive = false, rhythm = null;   // リズム天国風 コール&レスポンス
+    let rhythmPresses = [];                    // ▲を押したAudioContext時刻のキュー
+    let lastRhythmStats = null;                // 直近の成績 (デバッグ/確認用)
     let freezeTimer = 0, shakeTimer = 0;
     let glitchActive = false, invert = false;
     let stage5Final = false;            // 偽エンディング後の「ほんとうのさいご」
@@ -543,12 +548,14 @@
       2: 'ハッ‥ハッ‥ハ・・・。',
       3: 'じゅうりょくは むじひ である。',
       4: 'ネコの たましいが くだけちった。',
-      5: '※ このさきに セーブポイントは ない。'
+      5: '※ このさきに セーブポイントは ない。',
+      6: 'リズムに のれなかった。'
     };
     const STAGE_INTROS = {
       3: ['STAGE 3', '「じゅうりょく、はんてん。」'],
       4: ['STAGE 4', '「たましいの いろ」'],
-      5: ['STAGE 5', '「このゲームは あなたを しっている」']
+      5: ['STAGE 5', '「このゲームは あなたを しっている」'],
+      6: ['STAGE 6', '「アンコール」']
     };
 
     // オーディオ
@@ -574,6 +581,19 @@
       osc.connect(gain); gain.connect(actx.destination);
       osc.start(); osc.stop(actx.currentTime + duration);
     }
+    // 指定した「AudioContextの絶対時刻」に鳴らす (リズムゲーム用: サンプル単位で正確)
+    function playToneAt(freq, type, duration, vol, when) {
+      if (!actx) return;
+      // 予約時刻が過去だと例外になる (アプリを裏に回して戻した直後など)
+      const t = Math.max(when, actx.currentTime);
+      const osc = actx.createOscillator(), gain = actx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(vol, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+      osc.connect(gain); gain.connect(actx.destination);
+      osc.start(t); osc.stop(t + duration);
+    }
     function playJump() { initAudio(); if (!actx) return; const o = actx.createOscillator(); o.frequency.setValueAtTime(300, actx.currentTime); o.frequency.linearRampToValueAtTime(600, actx.currentTime + 0.1); const g = actx.createGain(); g.gain.value = 0.05; g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.1); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.1); }
     function playDeath() { playTone(150, 'sawtooth', 0.5, 0.1); playTone(100, 'square', 0.6, 0.1); }
     function playShoot() { playTone(800, 'square', 0.1, 0.05); }
@@ -587,11 +607,17 @@
     // 入力
     const keys = { left: false, right: false };
     let jumpPressed = false, jumpUsed = false;
+
+    // ▲を押した瞬間。リズムモード中は「押した時刻」を音の時計で記録する
+    function onJumpDown() {
+      if (rhythmActive) { rhythmPresses.push(actx ? actx.currentTime : 0); return; }
+      jumpPressed = true; playJump();
+    }
     document.addEventListener('keydown', e => {
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' '].includes(e.key)) e.preventDefault();
       if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
       if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
-      if ((e.key === 'ArrowUp' || e.key === ' ' || e.key === 'z') && !jumpUsed) { jumpPressed = true; jumpUsed = true; playJump(); }
+      if ((e.key === 'ArrowUp' || e.key === ' ' || e.key === 'z') && !jumpUsed) { jumpUsed = true; onJumpDown(); }
     });
     document.addEventListener('keyup', e => {
       if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
@@ -621,7 +647,7 @@
     dpadEl.addEventListener('touchend', handleDPadTouch, { passive: false });
     dpadEl.addEventListener('touchcancel', handleDPadTouch, { passive: false });
     const jumpBtn = document.getElementById('jumpBtn');
-    jumpBtn.addEventListener('touchstart', e => { e.preventDefault(); jumpBtn.classList.add('pressed'); if (!jumpUsed) { jumpPressed = true; jumpUsed = true; playJump(); } }, { passive: false });
+    jumpBtn.addEventListener('touchstart', e => { e.preventDefault(); jumpBtn.classList.add('pressed'); if (!jumpUsed) { jumpUsed = true; onJumpDown(); } }, { passive: false });
     jumpBtn.addEventListener('touchend', e => { e.preventDefault(); jumpBtn.classList.remove('pressed'); jumpUsed = false; }, { passive: false });
 
     // プレイヤー
@@ -630,7 +656,7 @@
 
     // ステージオブジェクト
     let platforms = [], hazards = [], goalObj = null, movingObjects = [], projectiles = [], pitSpikes = [];
-    let worldWidth = 0, trap = {}, trap2 = {}, trap3 = {}, trap4 = {}, trap5 = {};
+    let worldWidth = 0, trap = {}, trap2 = {}, trap3 = {}, trap4 = {}, trap5 = {}, trap6 = {};
 
     // ヘルパー
     function addSolid(x, y, w = TILE, h = TILE) { platforms.push({ x, y, w, h, type: 'solid', visible: true }); }
@@ -1037,6 +1063,320 @@
       worldWidth = 110 * S;
     }
 
+    // ============================================================
+    // ステージ6 「アンコール」 (リズム天国風 コール&レスポンス)
+    // ============================================================
+    function buildStage6() {
+      platforms = []; hazards = []; movingObjects = []; projectiles = []; pitSpikes = [];
+      enemies = []; decorations = []; zones = []; trueGoal = null; glitchActive = false; invert = false;
+      const wasDone = trap6 && trap6.done ? true : false;
+      trap6 = { done: wasDone };
+      const S = TILE;
+
+      // ①ステージそで (助走だけ。ここに理不尽は ない)
+      for (let i = 0; i <= 30; i++)addSolid(i * S, GY);
+      addSign(3 * S, GY, 'アンコール！');
+      addSign(9 * S, GY, '▲で リズムを まねろ');
+
+      // ②ステージ中央: 越えられない壁。リズムに勝つまで先へ進めない
+      if (!trap6.done) {
+        platforms.push({ x: 16 * S, y: GY - 6 * S, w: S, h: 6 * S, type: 'solid', visible: true, id: 'rhythmBarrier' });
+      } else {
+        platforms = platforms.filter(p => p.id !== 'rhythmBarrier');
+      }
+
+      // ③フィナーレ
+      addSign(22 * S, GY, 'ありがとう');
+      goalObj = { x: 28 * S, y: GY - 4 * S, w: S, h: 4 * S, poleKillH: 3 * S, flagY: GY - 4 * S, flagH: S };
+      worldWidth = 32 * S;
+    }
+
+    function updateTraps6() {
+      const S = TILE;
+      if (!trap6.done && !rhythmActive && player.x > 13.5 * S && player.onGround) startRhythm();
+      checkGoal();
+    }
+
+    // ---- リズムエンジン ----------------------------------------
+    // 時刻の基準は requestAnimationFrame ではなく AudioContext の時計。
+    // 音は osc.start(絶対時刻) で先に予約するので、描画が落ちてもズレない。
+    const RH_BPM = 120;
+    const RH_BEAT = 60 / RH_BPM;      // 1拍 = 0.5秒
+    const RH_JUST = 0.06;             // ジャスト判定 ±60ms
+    const RH_OK = 0.13;               // おしい判定 ±130ms
+    const RH_PPS = 220;               // ノーツが流れる速さ (px/秒)
+    const RH_MAX_MISS = 6;
+
+    // お手本(call)を聴いて、同じリズムを まねる(resp)
+    const RH_PHRASES = [
+      { call: [4, 5, 6], resp: [8, 9, 10] },
+      { call: [12, 13, 14.5], resp: [16, 17, 18.5] },
+      { call: [20, 20.5, 21, 22], resp: [24, 24.5, 25, 26] },
+      { call: [28, 29, 30, 30.5, 31], resp: [32, 33, 34, 34.5, 35] },
+    ];
+    const RH_END_BEAT = 38;
+
+    function startRhythm() {
+      initAudio();
+      if (!actx) return;                       // 音が出せない環境では発動しない
+      if (actx.state === 'suspended') actx.resume().catch(() => { });
+      const bgm = document.getElementById('bgm');
+      bgm.pause();                             // リズム中はBGMを止める
+
+      const cues = [];
+      for (const ph of RH_PHRASES) {
+        for (const b of ph.call) cues.push({ beat: b, t: b * RH_BEAT, kind: 'call', judged: false, result: '' });
+        for (const b of ph.resp) cues.push({ beat: b, t: b * RH_BEAT, kind: 'resp', judged: false, result: '' });
+      }
+      cues.sort((a, b) => a.t - b.t);
+
+      // 予約する音のリスト (メトロノーム + お手本)
+      const ev = [];
+      for (let b = 0; b <= RH_END_BEAT; b++) {
+        ev.push({ t: b * RH_BEAT, freq: b % 4 === 0 ? 440 : 330, type: 'square', dur: 0.05, vol: b % 4 === 0 ? 0.05 : 0.03 });
+      }
+      for (const c of cues) {
+        if (c.kind === 'call') ev.push({ t: c.t, freq: 880, type: 'triangle', dur: 0.16, vol: 0.12 });
+      }
+      ev.sort((a, b) => a.t - b.t);
+
+      rhythmPresses = [];
+      rhythmActive = true;
+      rhythm = {
+        startTime: actx.currentTime + 1.2,     // カウントインまでの間
+        lat: actx.outputLatency || actx.baseLatency || 0,
+        cues, ev, evIdx: 0,
+        just: 0, ok: 0, miss: 0, combo: 0, maxCombo: 0,
+        flash: '', flashT: 0, catBounce: 0, gameBounce: 0,
+        over: false, overT: 0,
+        wallStart: performance.now()           // 音の時計が止まったままかを見る用
+      };
+    }
+
+    // 「いま耳に届いている音」の時刻。出力遅延を引いて、聴こえた瞬間を基準にする
+    function rhythmNow() {
+      return actx.currentTime - rhythm.lat - rhythm.startTime;
+    }
+
+    function rhythmJudge(pressAt) {
+      const r = rhythm;
+      const t = pressAt - r.lat - r.startTime;
+      let best = null, bestD = Infinity;
+      for (const c of r.cues) {
+        if (c.kind !== 'resp' || c.judged) continue;
+        const d = Math.abs(t - c.t);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+      r.catBounce = 1;
+      if (!best || bestD > RH_OK) {          // 空打ち
+        r.miss++; r.combo = 0;
+        r.flash = 'ミス'; r.flashT = 1;
+        playTone(200, 'sawtooth', 0.12, 0.08);
+        return;
+      }
+      best.judged = true;
+      if (bestD <= RH_JUST) {
+        best.result = 'just'; r.just++; r.combo++;
+        r.maxCombo = Math.max(r.maxCombo, r.combo);
+        r.flash = 'ジャスト！'; r.flashT = 1;
+        playTone(1320, 'square', 0.12, 0.09);
+      } else {
+        best.result = 'ok'; r.ok++; r.combo = 0;
+        r.flash = 'おしい'; r.flashT = 1;
+        playTone(660, 'square', 0.12, 0.07);
+      }
+    }
+
+    function updateRhythm() {
+      const r = rhythm;
+
+      // 音が鳴らせない環境 (自動再生ブロック等) で詰まないようにする。
+      // 音の時計が止まったままなら、リズムは中止して先へ通す。
+      if (actx.state !== 'running') {
+        if (actx.state === 'suspended') actx.resume().catch(() => { });
+        if (performance.now() - r.wallStart > 6000) {
+          rhythmActive = false; rhythm = null; rhythmPresses = [];
+          trap6.done = true;
+          platforms = platforms.filter(p => p.id !== 'rhythmBarrier');
+          restartBgm();
+        }
+        return;
+      }
+
+      const now = rhythmNow();
+
+      // 音の先読み予約 (0.3秒先まで)
+      const ahead = actx.currentTime + 0.3;
+      while (r.evIdx < r.ev.length && r.startTime + r.ev[r.evIdx].t < ahead) {
+        const e = r.ev[r.evIdx++];
+        const when = r.startTime + e.t;
+        // 大きく過ぎた音は鳴らさない (裏に回っていた間の取りこぼしをまとめて鳴らさない)
+        if (when < actx.currentTime - 0.05) continue;
+        playToneAt(e.freq, e.type, e.dur, e.vol, when);
+      }
+
+      // 押した瞬間を判定 (フレームではなく音の時計で)
+      while (rhythmPresses.length) {
+        const p = rhythmPresses.shift();
+        if (!r.over && now > -0.5) rhythmJudge(p);
+      }
+
+      // 押されなかったノーツを見逃しにする
+      for (const c of r.cues) {
+        if (c.kind === 'resp' && !c.judged && now > c.t + RH_OK) {
+          c.judged = true; c.result = 'miss';
+          r.miss++; r.combo = 0;
+          r.flash = 'ミス'; r.flashT = 1;
+        }
+        if (c.kind === 'call' && !c.judged && now >= c.t) { c.judged = true; r.gameBounce = 1; }
+      }
+
+      if (r.flashT > 0) r.flashT -= 0.04;
+      if (r.catBounce > 0) r.catBounce -= 0.08;
+      if (r.gameBounce > 0) r.gameBounce -= 0.08;
+
+      // 失敗
+      if (!r.over && r.miss >= RH_MAX_MISS) { rhythmFail(); return; }
+
+      // 完走
+      if (!r.over && now > RH_END_BEAT * RH_BEAT) {
+        r.over = true; r.overT = 0;
+        playCoin();
+      }
+      if (r.over) {
+        r.overT++;
+        if (r.overT > 150) {
+          lastRhythmStats = { just: r.just, ok: r.ok, miss: r.miss, maxCombo: r.maxCombo, cleared: true };
+          rhythmActive = false; rhythm = null;
+          trap6.done = true;
+          platforms = platforms.filter(p => p.id !== 'rhythmBarrier');
+          restartBgm();
+        }
+      }
+    }
+
+    function rhythmFail() {
+      lastRhythmStats = { just: rhythm.just, ok: rhythm.ok, miss: rhythm.miss, maxCombo: rhythm.maxCombo, cleared: false };
+      rhythmActive = false; rhythm = null;
+      rhythmPresses = [];
+      restartBgm();
+      killPlayer();
+    }
+
+    // ---- リズム画面の描画 ---------------------------------------
+    function drawRhythmCat(cx, cy, s, bounce) {
+      const y = cy - bounce * 10;
+      ctx.fillStyle = '#111';
+      ctx.fillRect(cx - 10 * s, y - 2 * s, 20 * s, 16 * s);        // からだ
+      ctx.fillRect(cx - 8 * s, y - 16 * s, 16 * s, 15 * s);        // あたま
+      ctx.fillRect(cx - 8 * s, y - 21 * s, 5 * s, 6 * s);          // みみ
+      ctx.fillRect(cx + 3 * s, y - 21 * s, 5 * s, 6 * s);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx - 5 * s, y - 11 * s, 4 * s, 4 * s);
+      ctx.fillRect(cx + 1 * s, y - 11 * s, 4 * s, 4 * s);
+      ctx.fillStyle = '#111';
+      ctx.fillRect(cx - 4 * s, y - 10 * s, 2 * s, 3 * s);
+      ctx.fillRect(cx + 2 * s, y - 10 * s, 2 * s, 3 * s);
+    }
+
+    function drawRhythmGameChar(cx, cy, s, bounce) {
+      const y = cy - bounce * 10;
+      ctx.fillStyle = '#111';
+      ctx.fillRect(cx - 12 * s, y - 14 * s, 24 * s, 12 * s);
+      ctx.fillRect(cx - 16 * s, y - 10 * s, 4 * s, 8 * s);
+      ctx.fillRect(cx + 12 * s, y - 10 * s, 4 * s, 8 * s);
+      ctx.fillRect(cx - 8 * s, y - 2 * s, 5 * s, 5 * s);
+      ctx.fillRect(cx + 3 * s, y - 2 * s, 5 * s, 5 * s);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx - 7 * s, y - 11 * s, 4 * s, 4 * s);
+      ctx.fillRect(cx + 3 * s, y - 11 * s, 4 * s, 4 * s);
+    }
+
+    function drawRhythm() {
+      const W = canvas.width, H = canvas.height, r = rhythm;
+      const now = rhythmNow();
+
+      // 背景: 拍のたびに ふわっと脈打つ
+      const bp = ((now / RH_BEAT) % 1 + 1) % 1;
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(17,17,17,' + (Math.max(0, 1 - bp * 2) * 0.07).toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+
+      const targetX = Math.max(78, W * 0.24);
+      const callY = H * 0.42, respY = H * 0.62;
+      const s = Math.min(1.6, W / 420);
+
+      // 2本のレーン
+      ctx.strokeStyle = '#ddd'; ctx.lineWidth = 2;
+      for (const ly of [callY, respY]) {
+        ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W, ly); ctx.stroke();
+      }
+      // 判定ライン
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(targetX, callY - 40); ctx.lineTo(targetX, respY + 40); ctx.stroke();
+
+      // ノーツ
+      for (const c of r.cues) {
+        const x = targetX + (c.t - now) * RH_PPS;
+        if (x < -40 || x > W + 40) continue;
+        const y = c.kind === 'call' ? callY : respY;
+        ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2);
+        if (c.kind === 'call') {                 // お手本: 白丸 (聴くだけ)
+          ctx.fillStyle = '#fff'; ctx.fill();
+          ctx.strokeStyle = '#111'; ctx.lineWidth = 3; ctx.stroke();
+        } else if (!c.judged) {                  // これから押す: 黒丸
+          ctx.fillStyle = '#111'; ctx.fill();
+        } else {                                 // 判定ずみ
+          ctx.fillStyle = c.result === 'just' ? '#111' : (c.result === 'ok' ? '#888' : '#e0e0e0');
+          ctx.fill();
+        }
+      }
+
+      // キャラクター
+      drawRhythmGameChar(targetX - 46, callY + 18, s * 0.9, r.gameBounce);
+      drawRhythmCat(targetX - 46, respY + 26, s * 0.9, r.catBounce);
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#888';
+      ctx.font = 'bold ' + Math.round(13 * s) + 'px "Courier New", monospace';
+      ctx.fillText('おてほん', 14, callY - 46);
+      ctx.fillText('きみ', 14, respY - 46);
+
+      // 判定表示
+      if (r.flashT > 0) {
+        ctx.globalAlpha = Math.max(0, Math.min(1, r.flashT));
+        ctx.fillStyle = r.flash === 'ジャスト！' ? '#111' : (r.flash === 'おしい' ? '#777' : '#c0392b');
+        ctx.font = 'bold ' + Math.round(26 * s) + 'px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(r.flash, targetX, respY + 78);
+        ctx.globalAlpha = 1;
+      }
+
+      // 見出し
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#111';
+      if (r.over) {
+        ctx.font = 'bold ' + Math.round(24 * s) + 'px "Courier New", monospace';
+        ctx.fillText('アンコール、せいこう！', W / 2, H * 0.2);
+        ctx.font = 'bold ' + Math.round(15 * s) + 'px "Courier New", monospace';
+        ctx.fillText('さいだいコンボ ' + r.maxCombo, W / 2, H * 0.2 + 28 * s);
+      } else if (now < 4 * RH_BEAT) {
+        ctx.font = 'bold ' + Math.round(20 * s) + 'px "Courier New", monospace';
+        ctx.fillText('おてほんの リズムを まねろ', W / 2, H * 0.2);
+        ctx.font = Math.round(14 * s) + 'px "Courier New", monospace';
+        ctx.fillStyle = '#666';
+        ctx.fillText('▲を たてラインで おす', W / 2, H * 0.2 + 26 * s);
+      }
+
+      // スコア
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#333';
+      ctx.font = 'bold ' + Math.round(14 * s) + 'px "Courier New", monospace';
+      ctx.fillText('ジャスト ' + r.just + '   ミス ' + r.miss + ' / ' + RH_MAX_MISS, W - 14, H * 0.29);
+      if (r.combo >= 3) ctx.fillText(r.combo + ' コンボ！', W - 14, H * 0.29 + 22 * s);
+      ctx.textAlign = 'left';
+    }
+
     // 偽エンディング後の世界改変
     function applyFinalPhase() {
       goalObj = null;                    // 偽の旗は消える
@@ -1135,7 +1475,7 @@
         if (trueGoal) {
           const g = trueGoal;
           if (rectOverlap(player.x, player.y, CAT_W, CAT_H, g.x, g.flagY, g.w + 22, g.flagH)) {
-            triggerAllClear(true);
+            triggerEncore();
           }
           if (player.alive && rectOverlap(player.x, player.y, CAT_W, CAT_H, g.x + S / 2 - 3, g.flagY + g.flagH, 6, g.poleKillH)) {
             killPlayer();   // 最後の最後までポールは敵
@@ -1369,7 +1709,7 @@
       if (rectOverlap(player.x, player.y, CAT_W, CAT_H, g.x, g.flagY, g.w + 22, g.flagH)) {
         if (currentStage === 5) { if (!stage5Final) startFakeClear(); }
         else if (currentStage < STAGE_MAX) triggerStageClear();
-        else triggerAllClear(false);
+        else triggerAllClear(true);          // ステージ6のゴール = ほんとうのさいご
         return;
       }
       // ポール本体 → 死亡
@@ -1502,9 +1842,9 @@
     const deathCountEl = document.getElementById('deathCount');
     const stageLabelEl = document.getElementById('stageLabel');
 
-    const BUILDERS = { 1: buildStage1, 2: buildStage2, 3: buildStage3, 4: buildStage4, 5: buildStage5 };
-    const TRAP_FNS = { 1: updateTraps1, 2: updateTraps2, 3: updateTraps3, 4: updateTraps4, 5: updateTraps5 };
-    const SPAWNS = { 1: [60, 380], 2: [60, 380], 3: [60, 380], 4: [60, 380], 5: [17 * TILE, 380] };
+    const BUILDERS = { 1: buildStage1, 2: buildStage2, 3: buildStage3, 4: buildStage4, 5: buildStage5, 6: buildStage6 };
+    const TRAP_FNS = { 1: updateTraps1, 2: updateTraps2, 3: updateTraps3, 4: updateTraps4, 5: updateTraps5, 6: updateTraps6 };
+    const SPAWNS = { 1: [60, 380], 2: [60, 380], 3: [60, 380], 4: [60, 380], 5: [17 * TILE, 380], 6: [60, 380] };
 
     let deathTimer1 = null, deathTimer2 = null;
     function killPlayer() {
@@ -1528,6 +1868,7 @@
     function respawn() {
       IS_DEAD = false; pitSpikes = []; projectiles = [];
       gravityDir = 1; activeMode = 'normal'; freezeTimer = 0; battleActive = false; battle = null;
+      rhythmActive = false; rhythm = null; rhythmPresses = [];
       BUILDERS[currentStage]();
       if (currentStage === 5 && stage5Final) {
         applyFinalPhase();
@@ -1548,6 +1889,7 @@
       stageLabelEl.textContent = 'STAGE ' + n;
       pitSpikes = []; projectiles = [];
       gravityDir = 1; activeMode = 'normal'; freezeTimer = 0; battleActive = false; battle = null;
+      rhythmActive = false; rhythm = null; rhythmPresses = [];
       stage5Final = false;
       document.body.classList.remove('finalZone');
       BUILDERS[n]();
@@ -1561,8 +1903,38 @@
       state = 'stageclear';
       document.getElementById('stageClearTitle').textContent = 'STAGE ' + currentStage + ' クリア！';
       document.getElementById('stageClearMsg').textContent = '死亡回数 : ' + deathCount;
-      document.getElementById('nextStageBtn').textContent = 'STAGE ' + (currentStage + 1) + ' へ';
+      const btn = document.getElementById('nextStageBtn');
+      btn.textContent = 'STAGE ' + (currentStage + 1) + ' へ';
+      btn.style.display = '';
       document.getElementById('stageClearScreen').style.display = 'flex';
+    }
+
+    // ステージ5の「ほんとうのさいご」→ アンコール(ステージ6)へ
+    function triggerEncore() {
+      state = 'stageclear';
+      const scr = document.getElementById('stageClearScreen');
+      const title = document.getElementById('stageClearTitle');
+      const msg = document.getElementById('stageClearMsg');
+      const btn = document.getElementById('nextStageBtn');
+      title.textContent = 'ほんとうの 全ステージクリア！';
+      msg.textContent = '総死亡回数 : ' + deathCount + ' ／ きみは ゲームに かった。';
+      btn.style.display = 'none';
+      scr.style.display = 'flex';
+      playCoin();
+      setTimeout(() => {
+        if (state !== 'stageclear') return;
+        title.textContent = '…と おもった？';
+        msg.textContent = '……';
+        playGlitch(); playGlitch();
+      }, 2000);
+      setTimeout(() => {
+        if (state !== 'stageclear') return;
+        title.textContent = 'アンコール！';
+        msg.textContent = 'ゲームは まだ おわらない。さいごは リズムだ。';
+        btn.textContent = 'STAGE 6 へ';
+        btn.style.display = '';
+        playError();
+      }, 3300);
     }
 
     function goNextStage() {
@@ -1622,6 +1994,8 @@
     function backToStageSelect() {
       cancelPendingDeath();
       state = 'title';
+      rhythmActive = false; rhythm = null; rhythmPresses = [];
+      trap6 = {};
       document.getElementById('stageClearScreen').style.display = 'none';
       document.getElementById('clearScreen').style.display = 'none';
       document.body.classList.remove('finalZone');
@@ -1645,6 +2019,7 @@
       state = 'timeup';
       cancelPendingDeath();
       battleActive = false; battle = null;
+      rhythmActive = false; rhythm = null; rhythmPresses = [];
       document.getElementById('bgm').pause();
       playTone(660, 'sine', 0.3, 0.08);
       setTimeout(() => playTone(440, 'sine', 0.5, 0.08), 300);
@@ -1654,6 +2029,8 @@
     }
 
     function backToTitle() {
+      rhythmActive = false; rhythm = null; rhythmPresses = [];
+      trap6 = {};
       document.getElementById('timeUpScreen').style.display = 'none';
       document.getElementById('stageClearScreen').style.display = 'none';
       document.getElementById('clearScreen').style.display = 'none';
@@ -2085,6 +2462,12 @@
         if (battleActive) { drawBattle(); return; }
       }
 
+      // リズム中も世界が止まる (時刻は音の時計で進む)
+      if (rhythmActive) {
+        updateRhythm();
+        if (rhythmActive) { drawRhythm(); return; }
+      }
+
       // フリーズ事件 (偽の応答なし)
       if (freezeTimer > 0) {
         freezeTimer--;
@@ -2193,7 +2576,14 @@
     window._neko = {
       goStage: n => { initAudio(); document.getElementById('titleScreen').style.display = 'none'; document.getElementById('stageClearScreen').style.display = 'none'; document.getElementById('clearScreen').style.display = 'none'; startStage(n); },
       get player() { return player; },
-      get state() { return { state, currentStage, deathCount, activeMode, gravityDir, battleActive, stage5Final, freezeTimer }; },
+      get state() { return { state, currentStage, deathCount, activeMode, gravityDir, battleActive, rhythmActive, stage5Final, freezeTimer }; },
+      get rhythm() { return rhythm; },
+      get actx() { return actx; },
+      get lastRhythmStats() { return lastRhythmStats; },
+      get trap6done() { return !!trap6.done; },
+      get rhythmBarrier() { return platforms.some(p => p.id === 'rhythmBarrier'); },
+      pressRhythm: t => { rhythmPresses.push(t); },
+      forceFinal: () => { stage5Final = true; applyFinalPhase(); },
       set px(v) { player.x = v; snapCamera(); },
       set py(v) { player.y = v; },
       get battle() { return battle; },
