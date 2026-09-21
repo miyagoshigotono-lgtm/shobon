@@ -24,8 +24,8 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
-  // HTMLとmanifest.jsonはネットワーク優先
-  if (url.includes('index.html') || url.includes('manifest.json') || url.endsWith('/')) {
+  // HTMLとmanifest.jsonはネットワーク優先 (neko3d.html なども ふくむ)
+  if (url.endsWith('.html') || url.includes('manifest.json') || url.endsWith('/')) {
     e.respondWith(
       fetch(e.request)
         .then(res => {
