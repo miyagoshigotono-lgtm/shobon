@@ -169,6 +169,15 @@
       transition: background .15s, color .15s;
     }
 
+    #to3dBtn {
+      display: inline-block;
+      margin-top: 14px;
+      text-decoration: none;
+      font-size: clamp(11px, 3vw, 15px);
+      letter-spacing: 3px;
+      border-style: dashed;
+    }
+
     .menuBtn:active,
     .menuBtn:hover {
       background: #111;
@@ -461,6 +470,7 @@
     <h1>ねこのアクション</h1>
     <p>ゆっくりしていってね！！！<br>（あそべるのは 20ぷん まで）</p>
     <button class="menuBtn" onclick="showStageSelect()">はじめる</button>
+    <a class="menuBtn" id="to3dBtn" href="neko3d.html">ねこのアクション3D へ</a>
   </div>
 
   <div id="stageSelectScreen">

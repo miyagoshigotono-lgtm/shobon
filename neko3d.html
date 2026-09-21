@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>ねこのアクション3D</title>
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="ねこのアクション3D">
+  <meta name="theme-color" content="#111111">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #fff;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      touch-action: none;
+      user-select: none;
+    }
+
+    canvas { display: block; }
+
+    /* ---------- HUD ---------- */
+    #hud {
+      position: fixed;
+      top: 12px; left: 0; right: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 10px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #courseLabel, #deathCount, #timeLeft {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(10px, 2.6vw, 13px);
+      color: #333;
+      letter-spacing: 1px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 4px clamp(6px, 2vw, 14px);
+      border: 1px solid #bbb;
+      white-space: nowrap;
+    }
+
+    #timeLeft.warning { color: #c0392b; border-color: #c0392b; }
+
+    #backBtn {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(9px, 2.4vw, 11px);
+      letter-spacing: 1px;
+      color: #666;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid #ccc;
+      padding: 5px clamp(6px, 2vw, 12px);
+      cursor: pointer;
+      pointer-events: auto;
+      white-space: nowrap;
+    }
+
+    #backBtn:active { color: #c0392b; border-color: #c0392b; }
+
+    /* ---------- かさなる画面 ---------- */
+    .screen {
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .screen.show { display: flex; }
+
+    .screen h1 {
+      font-size: clamp(22px, 7vw, 44px);
+      letter-spacing: 4px;
+      color: #111;
+      margin-bottom: 10px;
+    }
+
+    .screen h2 {
+      font-size: clamp(18px, 5vw, 32px);
+      letter-spacing: 3px;
+      color: #111;
+      margin-bottom: 14px;
+    }
+
+    .screen p {
+      font-size: clamp(11px, 3vw, 15px);
+      color: #555;
+      letter-spacing: 2px;
+      line-height: 1.9;
+      margin-bottom: 28px;
+    }
+
+    .menuBtn {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(13px, 3.6vw, 18px);
+      letter-spacing: 4px;
+      color: #111;
+      background: none;
+      border: 2px solid #111;
+      padding: 12px 32px;
+      margin: 6px;
+      cursor: pointer;
+    }
+
+    .menuBtn:active { background: #111; color: #fff; }
+
+    #titleCat { margin-bottom: 18px; }
+
+    #courseGrid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(70px, 1fr));
+      gap: 18px;
+      margin-bottom: 30px;
+      max-width: 340px;
+    }
+
+    .courseBtn {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(16px, 4vw, 24px);
+      color: #111;
+      background: none;
+      border: 2px solid #111;
+      padding: 18px 0;
+      cursor: pointer;
+    }
+
+    .courseBtn:active { background: #111; color: #fff; }
+
+    #deathMsg {
+      position: fixed;
+      top: 46%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: clamp(14px, 4vw, 20px);
+      letter-spacing: 3px;
+      color: #c0392b;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity .15s;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    #deathMsg.show { opacity: 1; }
+
+    /* ---------- そうさパネル ---------- */
+    #controller {
+      --btn-size: clamp(96px, 13vh, 140px);
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 0 8px 16px;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .ctrl-group { display: flex; gap: 12px; pointer-events: all; }
+
+    .ctrl-btn {
+      height: var(--btn-size);
+      background: rgba(17, 17, 17, 0.07);
+      border: 3px solid rgba(17, 17, 17, 0.35);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 66px;
+      color: #111;
+      cursor: pointer;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: background .08s;
+      flex-shrink: 0;
+    }
+
+    .ctrl-btn.pressed, .ctrl-btn:active { background: rgba(17, 17, 17, 0.22); }
+
+    #leftBtn, #rightBtn { font-size: 80px; width: var(--btn-size); flex: 0 0 auto; }
+    #jumpBtn { width: var(--btn-size); flex: 0 0 auto; }
+
+    #dpad { gap: 0; flex: 0 0 auto; }
+    #dpad #leftBtn { border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    #dpad #rightBtn { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+  </style>
+</head>
+
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="hud">
+    <div id="courseLabel">COURSE 1</div>
+    <div id="deathCount">死亡 : 0</div>
+    <div id="timeLeft">のこり 20:00</div>
+    <button id="backBtn" onclick="backToSelect()">コースせんたく</button>
+  </div>
+
+  <div id="deathMsg">ハッ‥ハッ‥ハ・・・。</div>
+
+  <div class="screen show" id="titleScreen">
+    <div id="titleCat"><canvas id="titleCatCanvas" width="120" height="120"></canvas></div>
+    <h1>ねこのアクション3D</h1>
+    <p>おくゆきが できました。<br>りふじんさは そのままです。<br>（あそべるのは 20ぷん まで）</p>
+    <button class="menuBtn" onclick="showSelect()">はじめる</button>
+  </div>
+
+  <div class="screen" id="selectScreen">
+    <h2>コースを えらぶ</h2>
+    <div id="courseGrid">
+      <button class="courseBtn" onclick="startCourse(1)">1</button>
+      <button class="courseBtn" onclick="startCourse(2)">2</button>
+      <button class="courseBtn" onclick="startCourse(3)">3</button>
+    </div>
+    <button class="menuBtn" onclick="backToTitle()">もどる</button>
+  </div>
+
+  <div class="screen" id="clearScreen">
+    <h2 id="clearTitle">COURSE 1 クリア！</h2>
+    <p id="clearMsg">死亡回数 : 0</p>
+    <button class="menuBtn" id="nextBtn" onclick="goNext()">つぎへ</button>
+  </div>
+
+  <div class="screen" id="allClearScreen">
+    <h2>ぜんコース クリア！</h2>
+    <p id="allClearMsg">総死亡回数 : 0</p>
+    <button class="menuBtn" onclick="backToTitle()">タイトルへ</button>
+  </div>
+
+  <div class="screen" id="timeUpScreen">
+    <h2>20ぷん たちました</h2>
+    <p>ゲームの やりすぎは よくない。<br>ネコと いっしょに ひとやすみ しよう。</p>
+    <p id="timeUpMsg">きょうの 死亡回数 : 0</p>
+    <button class="menuBtn" onclick="backToTitle()">きゅうけいする</button>
+  </div>
+
+  <div id="controller">
+    <div class="ctrl-group" id="dpad">
+      <div class="ctrl-btn" id="leftBtn">◀</div>
+      <div class="ctrl-btn" id="rightBtn">▶</div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-btn" id="jumpBtn">▲</div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // キャンバスと 3D の基本
+    //   Z = おく / X = 左右 / Y = 上
+    //   外部ライブラリなし。透視投影 → 面を奥から順に塗る (画家のアルゴリズム)
+    // ============================================================
+    const cv = document.getElementById('gameCanvas');
+    const ctx = cv.getContext('2d');
+    let W = 0, H = 0, focal = 0, horizon = 0;
+
+    function resize() {
+      W = cv.width = window.innerWidth;
+      H = cv.height = window.innerHeight;
+      focal = Math.max(H * 0.72, W * 0.62);
+      horizon = H * 0.44;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const cam = { x: 0, y: 2.9, z: -7.5 };
+    const DRAW_DIST = 78;
+
+    function proj(x, y, z) {
+      const rz = z - cam.z;
+      if (rz < 0.5) return null;
+      const f = focal / rz;
+      return { x: W / 2 + (x - cam.x) * f, y: horizon - (y - cam.y) * f, rz };
+    }
+
+    // はこの かど (x,y,z それぞれ 0=手前側 / 1=奥側)
+    const CORNERS = [
+      [0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0],
+      [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]
+    ];
+    // 面: かどの順番と 外向きの法線
+    const FACES = [
+      { i: [2, 3, 7, 6], n: [0, 1, 0], k: 'top' },
+      { i: [0, 1, 3, 2], n: [0, 0, -1], k: 'front' },
+      { i: [5, 4, 6, 7], n: [0, 0, 1], k: 'front' },
+      { i: [4, 0, 2, 6], n: [-1, 0, 0], k: 'side' },
+      { i: [1, 5, 7, 3], n: [1, 0, 0], k: 'side' }
+    ];
+
+    let faceBuf = [];
+    let catBuf = [];
+
+    // 手前の面を カメラの直前で切る。これが無いと 足もとに あなが あく
+    function clipNear(poly) {
+      const nz = cam.z + 0.55;
+      const out = [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length];
+        const ai = a[2] >= nz, bi = b[2] >= nz;
+        if (ai) out.push(a);
+        if (ai !== bi) {
+          const t = (nz - a[2]) / (b[2] - a[2]);
+          out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, nz]);
+        }
+      }
+      return out;
+    }
+
+    function pushBox(x0, y0, z0, x1, y1, z1, tone, buf) {
+      buf = buf || faceBuf;
+      if (z1 - cam.z < 0.55) return;                // まるごと うしろ
+      if (z0 - cam.z > DRAW_DIST) return;           // とおすぎ
+      const c = [];
+      for (const k of CORNERS) c.push([k[0] ? x1 : x0, k[1] ? y1 : y0, k[2] ? z1 : z0]);
+      for (const f of FACES) {
+        let ax = 0, ay = 0, az = 0;
+        for (const idx of f.i) { ax += c[idx][0]; ay += c[idx][1]; az += c[idx][2]; }
+        ax /= 4; ay /= 4; az /= 4;
+        // 裏をむいた面は 描かない
+        if (f.n[0] * (ax - cam.x) + f.n[1] * (ay - cam.y) + f.n[2] * (az - cam.z) >= 0) continue;
+        const poly = clipNear(f.i.map(idx => c[idx]));
+        if (poly.length < 3) continue;
+        const pts = [];
+        for (const q of poly) {
+          const pr = proj(q[0], q[1], q[2]);
+          if (!pr) { pts.length = 0; break; }
+          pts.push(pr);
+        }
+        if (pts.length < 3) continue;
+        buf.push({ pts, depth: Math.max(0.6, az - cam.z), v: tone[f.k], ink: tone.ink });
+      }
+    }
+
+    // とおくは 白に とけていく (空気遠近)
+    function fog(v, depth) {
+      const t = Math.min(1, Math.max(0, (depth - 14) / 58));
+      const c = Math.round(v + (252 - v) * t);
+      return 'rgb(' + c + ',' + c + ',' + c + ')';
+    }
+
+    function flushFaces(buf) {
+      buf = buf || faceBuf;
+      buf.sort((a, b) => b.depth - a.depth);         // おくから 手前へ
+      for (const f of buf) {
+        const p = f.pts;
+        ctx.beginPath();
+        ctx.moveTo(p[0].x, p[0].y);
+        for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+        ctx.closePath();
+        ctx.fillStyle = fog(f.v, f.depth);
+        ctx.fill();
+        ctx.strokeStyle = fog(f.ink, f.depth);
+        ctx.lineWidth = Math.max(0.7, Math.min(2.6, 46 / f.depth));
+        ctx.stroke();
+      }
+      buf.length = 0;
+    }
+
+    // 色づかい (数字は グレーの明るさ)
+    const T_FLOOR_A = { top: 252, front: 234, side: 216, ink: 40 };
+    const T_FLOOR_B = { top: 238, front: 220, side: 204, ink: 40 };
+    const T_HAZARD = { top: 70, front: 40, side: 24, ink: 250 };
+    const T_FALL = { top: 96, front: 62, side: 44, ink: 250 };
+    const T_GOAL = { top: 252, front: 236, side: 218, ink: 30 };
+    const T_CAT = { top: 52, front: 30, side: 20, ink: 255 };
+
+    // ============================================================
+    // おと
+    // ============================================================
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let actx = null;
+    function initAudio() { if (!actx) actx = new AC(); if (actx.state === 'suspended') actx.resume().catch(() => { }); }
+    function tone(freq, type, dur, vol = 0.08) {
+      if (!actx) return;
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, actx.currentTime);
+      g.gain.setValueAtTime(vol, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+      o.connect(g); g.connect(actx.destination);
+      o.start(); o.stop(actx.currentTime + dur);
+    }
+    function sJump() { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.frequency.setValueAtTime(320, actx.currentTime); o.frequency.linearRampToValueAtTime(640, actx.currentTime + 0.1); g.gain.value = 0.05; g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.1); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.1); }
+    function sDeath() { tone(150, 'sawtooth', 0.5, 0.1); tone(100, 'square', 0.6, 0.1); }
+    function sLand() { tone(180, 'square', 0.07, 0.05); }
+    function sBreak() { tone(240, 'sawtooth', 0.18, 0.07); }
+    function sClear() { tone(880, 'square', 0.1, 0.07); setTimeout(() => tone(1320, 'square', 0.3, 0.07), 90); }
+    function sBoom() { tone(90, 'sawtooth', 0.3, 0.12); }
+
+    // ============================================================
+    // にゅうりょく
+    // ============================================================
+    const keys = { left: false, right: false };
+    let jumpPressed = false, jumpUsed = false;
+
+    document.addEventListener('keydown', e => {
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' '].includes(e.key)) e.preventDefault();
+      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+      if ((e.key === 'ArrowUp' || e.key === ' ' || e.key === 'z') && !jumpUsed) { jumpUsed = true; jumpPressed = true; }
+    });
+    document.addEventListener('keyup', e => {
+      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+      if (e.key === 'ArrowUp' || e.key === ' ' || e.key === 'z') jumpUsed = false;
+    });
+
+    const dpadEl = document.getElementById('dpad');
+    const lBtn = document.getElementById('leftBtn');
+    const rBtn = document.getElementById('rightBtn');
+    const jBtn = document.getElementById('jumpBtn');
+
+    function handleDPad(e) {
+      e.preventDefault();
+      let l = false, r = false;
+      for (let i = 0; i < e.touches.length; i++) {
+        const t = e.touches[i];
+        const el = document.elementFromPoint(t.clientX, t.clientY);
+        if (el === lBtn) l = true;
+        if (el === rBtn) r = true;
+      }
+      keys.left = l; keys.right = r;
+      lBtn.classList.toggle('pressed', l);
+      rBtn.classList.toggle('pressed', r);
+    }
+    for (const ev of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+      dpadEl.addEventListener(ev, handleDPad, { passive: false });
+    }
+    jBtn.addEventListener('touchstart', e => { e.preventDefault(); jBtn.classList.add('pressed'); if (!jumpUsed) { jumpUsed = true; jumpPressed = true; } }, { passive: false });
+    jBtn.addEventListener('touchend', e => { e.preventDefault(); jBtn.classList.remove('pressed'); jumpUsed = false; }, { passive: false });
+
+    // ============================================================
+    // ゲームの じょうたい
+    // ============================================================
+    const GRAV = 0.034, JUMP_V = 0.54, STRAFE = 0.16;
+    const PR = 0.34;                 // ネコの はば (はんけい)
+    const PH = 1.05;                 // ネコの たかさ
+    const PLAY_LIMIT_MS = 20 * 60 * 1000;
+
+    let state = 'title';
+    let course = 1, deathCount = 0, playTimeMs = 0;
+    let blocks = [], goalZ = 0, courseName = '';
+    let player = { x: 0, y: 0, z: 0, vy: 0, onGround: false, runSpd: 0.18 };
+    let shake = 0, frame = 0, deadTimer = 0, clearTimer = 0, coyote = 0, jumpBuf = 0;
+
+    const labelEl = document.getElementById('courseLabel');
+    const deathEl = document.getElementById('deathCount');
+    const timeEl = document.getElementById('timeLeft');
+    const deathMsgEl = document.getElementById('deathMsg');
+
+    const DEATH_MSGS = [
+      'ハッ‥ハッ‥ハ・・・。',
+      'おくゆきが つかめない。',
+      'ここは 3Dだぞ。',
+      'ネコは 9かい しねる。'
+    ];
+
+    // ---- コースを つくる 道具 ----
+    function floorSlab(x0, x1, z0, z1, y) {
+      y = y === undefined ? 0 : y;
+      // Z方向に 4ずつ きざむ (奥行きのソートと しましまの ため)
+      for (let z = z0; z < z1; z += 4) {
+        const e = Math.min(z + 4, z1);
+        blocks.push({ x0, x1, y0: y - 1.2, y1: y, z0: z, z1: e, kind: 'floor', solid: true, alt: Math.floor(z / 4) % 2 === 0 });
+      }
+    }
+    function fakeSlab(x0, x1, z0, z1, y) {
+      y = y === undefined ? 0 : y;
+      blocks.push({ x0, x1, y0: y - 1.2, y1: y, z0, z1, kind: 'fake', solid: true, alt: true, fuse: -1 });
+    }
+    function spike(x0, x1, z0, z1, y, h) {
+      y = y === undefined ? 0 : y;
+      blocks.push({ x0, x1, y0: y, y1: y + (h || 0.75), z0, z1, kind: 'spike', solid: false, deadly: true });
+    }
+    function faller(cx, z, w) {
+      w = w || 1.15;
+      blocks.push({
+        x0: cx - w, x1: cx + w, y0: 5.4, y1: 7.2, z0: z - w, z1: z + w,
+        kind: 'fall', solid: false, deadly: true, vy: 0, falling: false, restY: 5.4
+      });
+    }
+    function slider(cx, z, amp, spd, w) {
+      w = w || 1.0;
+      blocks.push({
+        x0: cx - w, x1: cx + w, y0: 0, y1: 1.7, z0: z - 0.7, z1: z + 0.7,
+        kind: 'slide', solid: false, deadly: true, baseX: cx, amp, spd, phase: Math.random() * 6.28, w
+      });
+    }
+    function goalGate(z) {
+      goalZ = z;
+      blocks.push({ x0: -3.4, x1: -2.6, y0: 0, y1: 4, z0: z, z1: z + 0.8, kind: 'goal', solid: false });
+      blocks.push({ x0: 2.6, x1: 3.4, y0: 0, y1: 4, z0: z, z1: z + 0.8, kind: 'goal', solid: false });
+      blocks.push({ x0: -3.4, x1: 3.4, y0: 3.4, y1: 4, z0: z, z1: z + 0.8, kind: 'goal', solid: false });
+    }
+
+    // ---- コース1「はじめての おくゆき」 ----
+    function buildCourse1() {
+      blocks = []; courseName = '「はじめての おくゆき」';
+      floorSlab(-3.4, 3.4, 0, 28);
+      spike(-0.9, 0.9, 19, 19.8);                 // まんなかを よける だけ
+      // 穴 28〜31.5
+      floorSlab(-3.4, 3.4, 31.5, 54);
+      spike(-3.4, -1.3, 41, 41.8);
+      spike(1.3, 3.4, 47, 47.8);
+      // 穴 54〜57.5
+      floorSlab(-3.4, 3.4, 57.5, 78);
+      fakeSlab(-1.2, 1.2, 64, 68);                // 見た目は ゆか。のると 消える
+      spike(-3.4, -1.6, 74, 74.8);
+      // 穴 78〜81.5
+      floorSlab(-3.0, 3.0, 81.5, 104);
+      spike(-0.8, 0.8, 89, 89.8);
+      spike(-3.0, -1.2, 96, 96.8);
+      floorSlab(-3.4, 3.4, 104, 122);
+      goalGate(118);
+    }
+
+    // ---- コース2「おちてくる」 ----
+    function buildCourse2() {
+      blocks = []; courseName = '「おちてくる」';
+      floorSlab(-3.4, 3.4, 0, 26);
+      faller(0, 17);
+      // 穴 26〜29.5
+      floorSlab(-3.4, 3.4, 29.5, 54);
+      faller(-2.0, 35); faller(2.0, 45);
+      // ほそい3レーン。まんなかは とちゅうだけ にせもの
+      floorSlab(-3.4, -1.1, 54, 76);
+      floorSlab(-1.1, 1.1, 54, 58);
+      fakeSlab(-1.1, 1.1, 58, 66);
+      floorSlab(-1.1, 1.1, 66, 76);
+      floorSlab(1.1, 3.4, 54, 76);
+      // レーンの さかいめに 落とす。かならず にげ場が のこる
+      faller(-1.2, 62, 0.95); faller(1.2, 71, 0.95);
+      // 穴 76〜79.5
+      floorSlab(-3.4, 3.4, 79.5, 114);
+      spike(-3.4, -1.1, 85, 85.8);
+      spike(1.1, 3.4, 93, 93.8);
+      faller(-1.3, 101, 0.95); faller(1.5, 108, 0.95);
+      floorSlab(-3.4, 3.4, 114, 132);
+      goalGate(128);
+    }
+
+    // ---- コース3「うごくかべ」 ----
+    function buildCourse3() {
+      blocks = []; courseName = '「うごくかべ」';
+      floorSlab(-3.4, 3.4, 0, 24);
+      slider(0, 15, 2.5, 0.024);
+      // 穴 24〜27.5
+      floorSlab(-3.4, 3.4, 27.5, 56);
+      slider(0, 34, 2.6, 0.030);
+      slider(0, 42, 2.6, -0.034);
+      faller(1.7, 48);
+      slider(0, 53, 2.7, 0.038);
+      // 穴 56〜59.5
+      floorSlab(-3.0, 3.0, 59.5, 84);
+      fakeSlab(-3.0, -0.8, 65, 70);
+      fakeSlab(0.8, 3.0, 74, 79);
+      slider(0, 68, 2.1, 0.040);
+      slider(0, 77, 2.1, -0.044);
+      // 穴 84〜87.5
+      floorSlab(-3.4, 3.4, 87.5, 116);
+      faller(-2.2, 93); faller(2.2, 93);
+      slider(0, 100, 2.8, 0.046);
+      spike(-3.4, -1.5, 106, 106.8);
+      spike(1.5, 3.4, 106, 106.8);
+      slider(0, 111, 2.8, -0.050);
+      floorSlab(-3.4, 3.4, 116, 134);
+      goalGate(130);
+    }
+
+    const BUILDERS = { 1: buildCourse1, 2: buildCourse2, 3: buildCourse3 };
+    const COURSE_MAX = 3;
+
+    // ============================================================
+    // すすむ・しぬ
+    // ============================================================
+    function startCourse(n) {
+      initAudio();
+      course = n;
+      BUILDERS[n]();
+      player = { x: 0, y: 0, z: 2, vy: 0, onGround: true, runSpd: 0.175 };
+      cam.x = 0; cam.y = 2.9; cam.z = player.z - 7.5;
+      deadTimer = 0; clearTimer = 0; shake = 0; coyote = 8; jumpBuf = 0;
+      labelEl.textContent = 'COURSE ' + n;
+      hideAll();
+      state = 'playing';
+    }
+
+    function killPlayer() {
+      if (state !== 'playing' || deadTimer > 0) return;
+      deadTimer = 1;
+      deathCount++;
+      deathEl.textContent = '死亡 : ' + deathCount;
+      player.vy = 0.30;
+      deathMsgEl.textContent = DEATH_MSGS[Math.min(DEATH_MSGS.length - 1, Math.floor(deathCount / 4))];
+      deathMsgEl.classList.add('show');
+      sDeath();
+      shake = 14;
+    }
+
+    function respawn() {
+      deathMsgEl.classList.remove('show');
+      const n = course;
+      BUILDERS[n]();
+      player = { x: 0, y: 0, z: 2, vy: 0, onGround: true, runSpd: 0.175 };
+      cam.x = 0; cam.z = player.z - 7.5;
+      deadTimer = 0; coyote = 8; jumpBuf = 0;
+    }
+
+    function triggerClear() {
+      state = 'clear';
+      clearTimer = 0;
+      sClear();
+      if (course < COURSE_MAX) {
+        document.getElementById('clearTitle').textContent = 'COURSE ' + course + ' クリア！';
+        document.getElementById('clearMsg').textContent = '死亡回数 : ' + deathCount;
+        document.getElementById('nextBtn').textContent = 'COURSE ' + (course + 1) + ' へ';
+        show('clearScreen');
+      } else {
+        document.getElementById('allClearMsg').textContent = '総死亡回数 : ' + deathCount;
+        show('allClearScreen');
+      }
+    }
+
+    function goNext() { startCourse(course + 1); }
+
+    // ============================================================
+    // 1フレームの こうしん
+    // ============================================================
+    function overlapXZ(b, x, z, r) {
+      return !(x + r < b.x0 || x - r > b.x1 || z + r < b.z0 || z - r > b.z1);
+    }
+
+    function update() {
+      frame++;
+
+      // しんだ あとは くるくる 落ちる
+      if (deadTimer > 0) {
+        deadTimer++;
+        player.vy -= GRAV;
+        player.y += player.vy;
+        player.z += player.runSpd * 0.3;
+        if (deadTimer > 70) respawn();
+        return;
+      }
+
+      // まえに すすむ (だんだん はやく)
+      player.runSpd = Math.min(0.30, player.runSpd + 0.00012);
+      player.z += player.runSpd;
+
+      // 左右
+      if (keys.left) player.x -= STRAFE;
+      if (keys.right) player.x += STRAFE;
+      player.x = Math.max(-4.6, Math.min(4.6, player.x));
+
+      // ジャンプ
+      // ふみ外した 直後でも すこしだけ 跳べる (コヨーテタイム) / 着地の 直前に 押しても ひろう
+      if (jumpPressed) { jumpBuf = 8; jumpPressed = false; }
+      if (jumpBuf > 0) jumpBuf--;
+      if (jumpBuf > 0 && coyote > 0) {
+        player.vy = JUMP_V; player.onGround = false;
+        coyote = 0; jumpBuf = 0; sJump();
+      }
+
+      // うごく しかけ
+      for (const b of blocks) {
+        if (b.kind === 'slide') {
+          b.phase += b.spd;
+          const cx = b.baseX + Math.sin(b.phase) * b.amp;
+          b.x0 = cx - b.w; b.x1 = cx + b.w;
+        }
+        if (b.kind === 'fall') {
+          if (!b.falling && player.z > b.z0 - 8 && player.z < b.z1 + 2) { b.falling = true; tone(260, 'square', 0.1, 0.06); }
+          if (b.falling) {
+            b.vy += 0.052;
+            b.y0 -= b.vy; b.y1 -= b.vy;
+            if (b.y0 <= 0) {
+              const h = b.y1 - b.y0;
+              b.y0 = 0; b.y1 = h; b.vy = 0; b.falling = false; b.landed = true;
+              if (Math.abs(player.z - (b.z0 + b.z1) / 2) < 14) { shake = 8; sBoom(); }
+            }
+          }
+        }
+        if (b.kind === 'fake' && b.fuse > 0) {
+          b.fuse--;
+          if (b.fuse === 0) { b.solid = false; b.gone = true; sBreak(); }
+        }
+      }
+
+      // おちる
+      const prevY = player.y;
+      player.vy -= GRAV;
+      player.y += player.vy;
+      player.onGround = false;
+
+      if (player.vy <= 0) {
+        for (const b of blocks) {
+          if (!b.solid || b.gone) continue;
+          if (!overlapXZ(b, player.x, player.z, PR)) continue;
+          if (prevY >= b.y1 - 0.06 && player.y <= b.y1) {
+            player.y = b.y1; player.vy = 0; player.onGround = true;
+            if (b.kind === 'fake' && b.fuse < 0) { b.fuse = 14; }   // のった しゅんかん 時限式
+            break;
+          }
+        }
+      }
+      if (player.onGround) coyote = 8; else if (coyote > 0) coyote--;
+
+      // あたると しぬ もの
+      for (const b of blocks) {
+        if (!b.deadly || b.gone) continue;
+        if (!overlapXZ(b, player.x, player.z, PR)) continue;
+        if (player.y + PH > b.y0 && player.y < b.y1) { killPlayer(); return; }
+      }
+
+      // ならく
+      if (player.y < -7) { killPlayer(); return; }
+
+      // ゴール
+      if (goalZ && player.z > goalZ + 0.4) { triggerClear(); return; }
+
+      // カメラは すこし おくれて ついてくる
+      cam.x += (player.x * 0.72 - cam.x) * 0.12;
+      cam.y += ((player.y + 2.9) - cam.y) * 0.08;
+      cam.z = player.z - 7.5;
+    }
+
+    // ============================================================
+    // えがく
+    // ============================================================
+    function drawCat() {
+      const x = player.x, y = player.y, z = player.z;
+      const t = player.onGround ? Math.sin(frame * 0.38) * 0.055 : 0;   // はしる うごき
+      // ネコは おくへ 走るので、こちらには せなかを むける
+      // からだ
+      pushBox(x - 0.33, y + 0.10 + t, z - 0.30, x + 0.33, y + 0.62 + t, z + 0.34, T_CAT, catBuf);
+      // あたま (まえ = +Z)
+      pushBox(x - 0.27, y + 0.52, z - 0.02, x + 0.27, y + 1.04, z + 0.46, T_CAT, catBuf);
+      // みみ
+      pushBox(x - 0.26, y + 1.00, z + 0.14, x - 0.08, y + 1.26, z + 0.34, T_CAT, catBuf);
+      pushBox(x + 0.08, y + 1.00, z + 0.14, x + 0.26, y + 1.26, z + 0.34, T_CAT, catBuf);
+      // しっぽ (うしろに ぴん)
+      pushBox(x - 0.07, y + 0.46 + t, z - 0.62, x + 0.07, y + 0.60 + t, z - 0.26, T_CAT, catBuf);
+      pushBox(x - 0.07, y + 0.56 + t, z - 0.76, x + 0.07, y + 0.94 + t, z - 0.62, T_CAT, catBuf);
+      // あし
+      const sw = player.onGround ? Math.sin(frame * 0.38) * 0.14 : 0.06;
+      pushBox(x - 0.28, y, z + 0.02 + sw, x - 0.08, y + 0.24, z + 0.26 + sw, T_CAT, catBuf);
+      pushBox(x + 0.08, y, z + 0.02 - sw, x + 0.28, y + 0.24, z + 0.26 - sw, T_CAT, catBuf);
+    }
+
+    function drawWorld() {
+      // そら と じめん の したじ
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+      const g = ctx.createLinearGradient(0, horizon - H * 0.42, 0, horizon + H * 0.04);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.72, 'rgba(238,238,238,0.55)');
+      g.addColorStop(1, 'rgba(228,228,228,0.9)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, horizon - H * 0.42, W, H * 0.46);
+
+      ctx.save();
+      if (shake > 0) { shake--; ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake * 0.7); }
+
+      for (const b of blocks) {
+        if (b.gone) continue;
+        let tn;
+        if (b.kind === 'floor') tn = b.alt ? T_FLOOR_A : T_FLOOR_B;
+        else if (b.kind === 'fake') tn = b.fuse > 0 ? T_FALL : T_FLOOR_B;
+        else if (b.kind === 'spike') tn = T_HAZARD;
+        else if (b.kind === 'fall') tn = T_FALL;
+        else if (b.kind === 'slide') tn = T_HAZARD;
+        else tn = T_GOAL;
+        pushBox(b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, tn);
+      }
+      flushFaces(faceBuf);        // まず せかい
+      drawCat();
+      flushFaces(catBuf);         // ネコは いつでも 見えるように 最後
+      ctx.restore();
+
+      // ゴールまでの のこり
+      if (goalZ) {
+        const rest = Math.max(0, goalZ - player.z);
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold ' + Math.round(Math.min(18, W / 24)) + 'px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('のこり ' + Math.ceil(rest) + 'm', W / 2, H * 0.16);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    function drawIntro() {
+      if (player.z > 18) return;
+      const a = Math.min(1, (18 - player.z) / 8);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, a));
+      ctx.fillStyle = '#111';
+      ctx.font = 'bold ' + Math.round(Math.min(30, W / 14)) + 'px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('COURSE ' + course, W / 2, H * 0.26);
+      ctx.font = Math.round(Math.min(15, W / 26)) + 'px "Courier New", monospace';
+      ctx.fillStyle = '#555';
+      ctx.fillText(courseName, W / 2, H * 0.26 + 30);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+
+    // ============================================================
+    // 20ぷん の かぎり
+    // ============================================================
+    function updateTime() {
+      const r = Math.max(0, PLAY_LIMIT_MS - playTimeMs);
+      const s = Math.ceil(r / 1000);
+      timeEl.textContent = 'のこり ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+      timeEl.classList.toggle('warning', r <= 3 * 60 * 1000);
+    }
+
+    function triggerTimeUp() {
+      state = 'timeup';
+      document.getElementById('timeUpMsg').textContent = 'きょうの 死亡回数 : ' + deathCount;
+      show('timeUpScreen');
+      tone(660, 'sine', 0.3, 0.08);
+      setTimeout(() => tone(440, 'sine', 0.5, 0.08), 300);
+      updateTime();
+    }
+
+    // ============================================================
+    // がめんの きりかえ
+    // ============================================================
+    function hideAll() {
+      for (const id of ['titleScreen', 'selectScreen', 'clearScreen', 'allClearScreen', 'timeUpScreen']) {
+        document.getElementById(id).classList.remove('show');
+      }
+    }
+    function show(id) { hideAll(); document.getElementById(id).classList.add('show'); }
+
+    function showSelect() { initAudio(); state = 'title'; show('selectScreen'); }
+    function backToTitle() {
+      state = 'title';
+      deathCount = 0; deathEl.textContent = '死亡 : 0';
+      playTimeMs = 0; updateTime();
+      deathMsgEl.classList.remove('show');
+      show('titleScreen');
+    }
+    function backToSelect() {
+      state = 'title';
+      deathMsgEl.classList.remove('show');
+      show('selectScreen');
+    }
+
+    // ============================================================
+    // タイトルの ネコ (3Dで くるくる まわる)
+    // ============================================================
+    const tcv = document.getElementById('titleCatCanvas');
+    const tctx = tcv.getContext('2d');
+    let spin = 0;
+    function drawTitleCat() {
+      spin += 0.017;
+      tctx.clearRect(0, 0, 120, 120);
+      const cx = 60, cy = 74, sc = 46;
+      const cosA = Math.cos(spin), sinA = Math.sin(spin);
+      const parts = [
+        [-0.33, 0.10, -0.34, 0.33, 0.62, 0.30],
+        [-0.27, 0.55, -0.44, 0.27, 1.05, 0.04],
+        [-0.26, 1.02, -0.34, -0.08, 1.26, -0.16],
+        [0.08, 1.02, -0.34, 0.26, 1.26, -0.16],
+        [-0.07, 0.46, 0.28, 0.07, 0.60, 0.62],
+        [-0.07, 0.58, 0.52, 0.07, 0.92, 0.66]
+      ];
+      const faces = [];
+      for (const p of parts) {
+        const c = [];
+        for (const k of CORNERS) {
+          const x = k[0] ? p[3] : p[0], y = k[1] ? p[4] : p[1], z = k[2] ? p[5] : p[2];
+          const rx = x * cosA - z * sinA, rz = x * sinA + z * cosA;
+          c.push([cx + rx * sc, cy - (y - 0.55) * sc, rz]);
+        }
+        for (const f of FACES) {
+          let ax = 0, az = 0, ay = 0;
+          for (const i of f.i) { ax += c[i][0]; ay += c[i][1]; az += c[i][2]; }
+          az /= 4;
+          const p0 = c[f.i[0]], p1 = c[f.i[1]], p2 = c[f.i[2]];
+          const cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+          if (cross <= 0) continue;
+          faces.push({ c: f.i.map(i => c[i]), z: az, v: T_CAT[f.k] });
+        }
+      }
+      faces.sort((a, b) => b.z - a.z);
+      for (const f of faces) {
+        tctx.beginPath();
+        tctx.moveTo(f.c[0][0], f.c[0][1]);
+        for (let i = 1; i < 4; i++) tctx.lineTo(f.c[i][0], f.c[i][1]);
+        tctx.closePath();
+        tctx.fillStyle = 'rgb(' + f.v + ',' + f.v + ',' + f.v + ')';
+        tctx.fill();
+        tctx.strokeStyle = '#fff'; tctx.lineWidth = 1;
+        tctx.stroke();
+      }
+    }
+
+    // ============================================================
+    // メインループ
+    // ============================================================
+    let last = 0;
+    function loop(ts) {
+      requestAnimationFrame(loop);
+      const dt = Math.min(ts - last, 34); last = ts;
+
+      if (state !== 'playing') {
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+        if (state === 'title') drawTitleCat();
+        return;
+      }
+
+      playTimeMs += dt;
+      if (frame % 15 === 0) updateTime();
+      if (playTimeMs >= PLAY_LIMIT_MS) { triggerTimeUp(); return; }
+
+      update();
+      if (state === 'playing') { drawWorld(); drawIntro(); }
+    }
+    requestAnimationFrame(loop);
+    updateTime();
+
+    // かくにん用
+    window._neko3d = {
+      get state() { return { state, course, deathCount, z: player.z, x: player.x, y: player.y, onGround: player.onGround }; },
+      get player() { return player; },
+      get blocks() { return blocks; },
+      get goalZ() { return goalZ; },
+      start: n => startCourse(n),
+      set pz(v) { player.z = v; cam.z = v - 7.5; },
+      set px(v) { player.x = v; },
+      set py(v) { player.y = v; },
+      set spd(v) { player.runSpd = v; }
+    };
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => { });
+      });
+    }
+  </script>
+</body>
+
+</html>
