@@ -169,14 +169,40 @@
       transition: background .15s, color .15s;
     }
 
-    #to3dBtn,
-    #toAthleticBtn {
+    /* タイトル画面に並べる2本のゲーム */
+    .gameBtn {
       display: inline-block;
-      margin-top: 14px;
+      margin-top: 18px;
       text-decoration: none;
-      font-size: clamp(11px, 3vw, 15px);
-      letter-spacing: 3px;
-      border-style: dashed;
+      min-width: 260px;
+    }
+
+    /* ゲーム名の下に出す小さな説明 */
+    .gameNote {
+      font-family: 'Courier New', monospace;
+      font-size: clamp(9px, 2.6vw, 12px);
+      letter-spacing: 2px;
+      color: #888;
+      margin-top: 6px;
+    }
+
+    /* ステージ選択：クリア済みの印 */
+    .stageBtn.cleared {
+      border-style: double;
+      border-width: 4px;
+    }
+
+    .stageBtn .clearMark {
+      display: block;
+      font-size: clamp(8px, 2.4vw, 11px);
+      letter-spacing: 1px;
+      margin-top: 4px;
+      color: #888;
+    }
+
+    .stageBtn:active .clearMark,
+    .stageBtn:hover .clearMark {
+      color: #fff;
     }
 
     .menuBtn:active,
@@ -470,21 +496,22 @@
     <div id="titleCat"><canvas id="titleCatCanvas" width="64" height="64"></canvas></div>
     <h1>ねこのアクション</h1>
     <p>ゆっくりしていってね！！！<br>（あそべるのは 20ぷん まで）</p>
-    <button class="menuBtn" onclick="showStageSelect()">はじめる</button>
-    <a class="menuBtn" id="to3dBtn" href="neko3d.html">ねこのアクション3D へ</a>
-    <a class="menuBtn" id="toAthleticBtn" href="https://miyagoshigotono-lgtm.github.io/black-cat-athletic/">くろねこアスレチック へ</a>
+    <button class="menuBtn gameBtn" onclick="showStageSelect()">ねこのアクション</button>
+    <div class="gameNote">よこスクロール ／ ぜんぶで 7ステージ</div>
+    <a class="menuBtn gameBtn" id="toAthleticBtn" href="https://miyagoshigotono-lgtm.github.io/black-cat-athletic/">ねこのアクション２</a>
+    <div class="gameNote">3D アスレチック ／ ぜんぶで 3ステージ</div>
   </div>
 
   <div id="stageSelectScreen">
     <h2>ステージをえらぶ</h2>
     <div id="stageGrid">
-      <button class="stageBtn" onclick="startStageFromSelect(1)">1</button>
-      <button class="stageBtn" onclick="startStageFromSelect(2)">2</button>
-      <button class="stageBtn" onclick="startStageFromSelect(3)">3</button>
-      <button class="stageBtn" onclick="startStageFromSelect(4)">4</button>
-      <button class="stageBtn" onclick="startStageFromSelect(5)">5</button>
-      <button class="stageBtn" onclick="startStageFromSelect(6)">6</button>
-      <button class="stageBtn" onclick="startStageFromSelect(7)">7</button>
+      <button class="stageBtn" data-stage="1" onclick="startStageFromSelect(1)"><span class="stageNum">1</span></button>
+      <button class="stageBtn" data-stage="2" onclick="startStageFromSelect(2)"><span class="stageNum">2</span></button>
+      <button class="stageBtn" data-stage="3" onclick="startStageFromSelect(3)"><span class="stageNum">3</span></button>
+      <button class="stageBtn" data-stage="4" onclick="startStageFromSelect(4)"><span class="stageNum">4</span></button>
+      <button class="stageBtn" data-stage="5" onclick="startStageFromSelect(5)"><span class="stageNum">5</span></button>
+      <button class="stageBtn" data-stage="6" onclick="startStageFromSelect(6)"><span class="stageNum">6</span></button>
+      <button class="stageBtn" data-stage="7" onclick="startStageFromSelect(7)"><span class="stageNum">7</span></button>
     </div>
     <button id="backToTitleBtn" onclick="backToTitleFromSelect()">もどる</button>
   </div>
@@ -2410,6 +2437,7 @@
 
     function triggerStageClear() {
       state = 'stageclear';
+      markStageCleared(currentStage);
       document.getElementById('stageClearTitle').textContent = 'STAGE ' + currentStage + ' クリア！';
       document.getElementById('stageClearMsg').textContent = '死亡回数 : ' + deathCount;
       const btn = document.getElementById('nextStageBtn');
@@ -2421,6 +2449,7 @@
     // ステージ5の「ほんとうのさいご」→ アンコール(ステージ6)へ
     function triggerEncore() {
       state = 'stageclear';
+      markStageCleared(currentStage);
       const scr = document.getElementById('stageClearScreen');
       const title = document.getElementById('stageClearTitle');
       const msg = document.getElementById('stageClearMsg');
@@ -2454,6 +2483,7 @@
 
     function triggerAllClear(real) {
       state = 'clear';
+      markStageCleared(currentStage);
       const scr = document.getElementById('clearScreen');
       const title = document.getElementById('clearTitle');
       const msg = document.getElementById('clearMsg');
@@ -2480,8 +2510,50 @@
       startStage(1);
     }
 
+    /* ── クリアしたステージの記録（この端末のブラウザにだけ残る） ──
+       保存できない環境（プライベートウィンドウなど）でも遊べるよう、失敗しても黙って無視する */
+    const CLEARED_KEY = 'neko-action.cleared';
+
+    function loadCleared() {
+      try {
+        const raw = localStorage.getItem(CLEARED_KEY);
+        if (!raw) return [];
+        const list = JSON.parse(raw);
+        return Array.isArray(list) ? list.filter(n => typeof n === 'number') : [];
+      } catch (e) { return []; }
+    }
+
+    function markStageCleared(n) {
+      try {
+        const list = loadCleared();
+        if (list.indexOf(n) < 0) {
+          list.push(n);
+          localStorage.setItem(CLEARED_KEY, JSON.stringify(list));
+        }
+      } catch (e) { /* 保存できなくても遊びには影響しない */ }
+    }
+
+    /* ステージ選択のボタンに「クリア」の印を付け直す */
+    function refreshStageMarks() {
+      const cleared = loadCleared();
+      document.querySelectorAll('#stageGrid .stageBtn').forEach(btn => {
+        const n = Number(btn.dataset.stage);
+        const done = cleared.indexOf(n) >= 0;
+        btn.classList.toggle('cleared', done);
+        let mark = btn.querySelector('.clearMark');
+        if (done && !mark) {
+          mark = document.createElement('span');
+          mark.className = 'clearMark';
+          mark.textContent = 'クリア';
+          btn.appendChild(mark);
+        } else if (!done && mark) {
+          mark.remove();
+        }
+      });
+    }
     function showStageSelect() {
       initAudio(); restartBgm();
+      refreshStageMarks();
       document.getElementById('titleScreen').style.display = 'none';
       document.getElementById('stageSelectScreen').style.display = 'flex';
       deathCount = 0;
